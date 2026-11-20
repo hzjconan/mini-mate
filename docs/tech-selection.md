@@ -1,8 +1,8 @@
-# MiniMate 技术选型文档（v3.4）
+# MiniMate 技术选型文档（v3.5）
 
 | 项目 | 内容 |
 |---|---|
-| 文档状态 | v3.4。已确定对话架构为方案 B（实时语音模型只出文字 + 情感 TTS），方案 C 为备选；v3.3–v3.4 回写 M0 能力探测实测结论；剩余未决项集中在第 9 章「待验证项」 |
+| 文档状态 | v3.5。已确定对话架构为方案 B（实时语音模型只出文字 + 情感 TTS），方案 C 为备选；v3.3–v3.5 回写 M0 能力探测实测结论；剩余未决项集中在第 9 章「待验证项」 |
 | 适用阶段 | MVP / 个人自用 |
 | 目标平台 | iOS 26+（仅 iPhone） |
 | 参考设备 | iPhone 16 Pro Max（A18 Pro / 8GB / TrueDepth） |
@@ -424,7 +424,7 @@ M1 与 M2 可以并行；M1 不应跳过，它是产品体验的地基。
 - **V1 ✅ 已测**：`deviceNotEligible`——国行型号硬屏蔽 Apple Intelligence，M0 结论为本机 FM 不可用（退路生效）。
 - **V2 ✅ 已测**：zh_CN 支持且资源已安装（zh_TW/zh_HK/zh_CN 均支持，已装 zh_TW、zh_CN）。
 - **V3 部分已测**：`SpeechDetector` 可构造并加入 `SpeechAnalyzer`；误开率/效果仍待 M2b 实测。
-- **NLEmbedding 简体句向量**（非 V 表条目，但属 V1 退路依赖项）：**可用**（v3.4 复核推翻 v3.3 的"返回 nil"）。iOS 27.2 上同一进程内首次 `sentenceEmbedding(for:)` 会返回 nil，需重试或改用 `sentenceEmbedding(for:revision:)`。区分度弱：3 组近/远义句只有 2 组排序正确（"我有点难过"离"明天要开会"比离"心情不太好"更近），且近义句距离 0.37–0.49 → 离线意图匹配仍以关键词 + CreateML 为主，embedding 只作辅助层，阈值须实测。`NLContextualEmbedding` 中文模型（512 维）可用：进程早期第 1 次 `load()` 会失败（`Failed to locate embedding model`，`hasAvailableAssets` 同时误报 false），约 300 ms 后重试即成功；区分度与句向量相近。详见 001 research.md。
+- **NLEmbedding 简体句向量**（非 V 表条目，但属 V1 退路依赖项）：**可用**（v3.4 复核推翻 v3.3 的"返回 nil"）。iOS 27.2 上同一进程内首次 `sentenceEmbedding(for:)` 会返回 nil，需重试或改用 `sentenceEmbedding(for:revision:)`。区分度弱：3 组近/远义句只有 2 组排序正确（"我有点难过"离"明天要开会"比离"心情不太好"更近），且近义句距离 0.37–0.49 → 离线意图匹配仍以关键词 + CreateML 为主，embedding 只作辅助层，阈值须实测。`NLContextualEmbedding` 中文模型（512 维）**可用**：进程内首次 `load()` 会失败（`hasAvailableAssets` 同时误报 false），但**不是固定延迟**——先等 300 ms 再首次调用仍 5/5 失败，首次失败后 50–100 ms 重试即成功（5/5）；`requestAssets()` 首次可达 5.5 s，诊断不使用。详见 001 research.md。
 - **ARKit 人脸追踪**：`isSupported = true`（预期）。
 | V4 | 候选厂商实时接口能否只输出文字 | 查文档 + 试接（阿里百炼 Qwen-Omni、火山引擎豆包、OpenAI） | M2a | 方案 C |
 | V5 | 只出文字时模型是否仍理解语气 | 同一句话录 3 种语气，检查 `<user:…>` 与回答差异 | M2a | 方案 C（直接出语音时语气理解通常更充分）或方案 A |
@@ -499,3 +499,4 @@ M1 与 M2 可以并行；M1 不应跳过，它是产品体验的地基。
 | v3.2 | 签名约束更新：2026-11-20 真机安装时免费账号 iPhone 注册名额打满（跨项目共享、无法在线删除），购入付费个人会员。签名 7 天改为约一年，`increased-memory-limit` 可用（V12 前提解决），Push 技术障碍消除（产品定位仍不主动推送） |
 | v3.3 | M0 能力探测实测回写：V1 国行设备 `deviceNotEligible`（FM 本机不可用，M4 只剩 MLX）；V2 zh_CN 支持+已安装；V3 可构造；NLEmbedding 简体句向量实测 nil → 离线意图匹配降级关键词 + CreateML；ARKit 人脸追踪支持 |
 | v3.4 | 复核 NLEmbedding：v3.3 的"返回 nil"是首次调用的系统怪癖（重试或指定 revision 即可加载），简体句向量可用；但区分度弱（3 组中 1 组排序颠倒），离线意图匹配仍以关键词 + CreateML 为主、embedding 降为辅助层；新增 `NLContextualEmbedding` 探测（模型已在设备上；进程早期首次加载失败，延迟约 300 ms 重试即可）；修复文档状态行的表格断裂 |
+| v3.5 | 真机 A/B 复核 `NLContextualEmbedding` 的"延迟重试"：首次 `load()` 失败是进程内首次查询触发资源初始化的一次性状态，先等 300 ms 再首次调用仍 5/5 失败；首次失败后 50–100 ms 重试即成功（5/5），无需固定 300 ms。`requestAssets()` 首次实测 5.5 s（可能触发资源检查/下载），诊断不使用；探测器改为 100 ms 退避、2 s 截止。详见 001 research.md |

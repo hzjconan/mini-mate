@@ -70,7 +70,7 @@
 | V2 SpeechTranscriber zh-CN | ✅ 可用 | zh_CN 支持且资源已安装（zh_TW/HK/CN 均支持，已装 zh_TW、zh_CN） | 端侧/并行转写可用简体（003 V7、004 离线转写前提成立） |
 | V3 SpeechDetector | ✅ 可用 | 可构造并加入 `SpeechAnalyzer` | 人声闸门可用；误开率/效果仍待 003 M2b 实测 |
 | NLEmbedding 中文 | ✅ 可用（复核修正） | 首次探测记为 nil 是误判，见下文"NLEmbedding 复核"；640 维，近<远 2/3 | 离线意图匹配仍以关键词 + CreateML 为主；004 的 I-2 embedding 层可作辅助，阈值须重新实测 |
-| NLContextualEmbedding 中文 | ✅ 可用（需延迟重试） | 模型已在设备上，512 维；进程早期第 1 次 `load()` 报 `Failed to locate embedding model`，立即重试也失败，约 300 ms 后重试成功（2/2 次） | 与 NLEmbedding 同为辅助候选；第 1 组区分度更好，另两组同样偏弱 |
+| NLContextualEmbedding 中文 | ✅ 可用（首次失败后重试） | 模型已在设备上，512 维；进程内首次 `load()` 失败（`hasAvailableAssets=false`），50–100 ms 后重试即成功；先等 300 ms 再首次调用仍失败（5/5），详见下文 A/B | 与 NLEmbedding 同为辅助候选；第 1 组区分度更好，另两组同样偏弱 |
 | ARKit 人脸追踪 | ✅ 可用 | `ARFaceTrackingConfiguration.isSupported = true` | 按预期，TrueDepth 可用 |
 | 重签耗时（SC-001） | ✅ ~30 s | ⌘R 原地重签（付费账号 Xcode Managed Profile），@AppStorage 计数器保留（5→5） | 达标（≤5 min）|
 
@@ -80,7 +80,7 @@
 
 - **首次调用返回 nil**：`NLEmbedding.sentenceEmbedding(for: .simplifiedChinese)` 在同一进程内的第一次调用返回 nil，紧接着第二次调用就非 nil。先等 4 s 再调用，第一次照样是 nil，所以不是等待时间的问题。看起来是进程里第一次调用 sentence embedding 都会失败，与语言无关（某次运行先调中文失败、再调英文成功）。偶尔前两次都是 nil，这时直接调 `sentenceEmbedding(for:revision: currentSentenceEmbeddingRevision(for:))` 可以加载成功。`supportedSentenceEmbeddingRevisions(.simplifiedChinese) = [1]`；日语为空，确实不支持。
 - **没有公开的下载 API**：iOS 27 SDK 中 `NLEmbedding` 没有请求资源的接口（网上流传的 `requestEmbeddingAssets` 并不存在）。`NLTagger.requestAssets(for: .simplifiedChinese, tagScheme: .lemma)` 2 分钟以上不返回。
-- **`NLContextualEmbedding`**：资源已在设备上，加载 0.045 s，12 句共 0.097 s。在新进程里过早调用时，`hasAvailableAssets = false`，`load()` 报 `Failed to locate embedding model`，紧接着重试（间隔不到 10 ms）也失败（3/3 次）。改为间隔 300 ms 重试后，第 2 次就能成功，距第 1 次 362 ms / 395 ms（2/2 次），此时 `hasAvailableAssets = true`。推测系统要在第一次查询后花几百毫秒建立资源索引。探测器最多试 4 次、间隔 300 ms。`hasAvailableAssets` 在进程早期不可信，应以 `load()` 的结果为准；不要据此调用 `requestAssets()` 去重复下载。
+- **`NLContextualEmbedding`**：资源已在设备上，加载 ~0.05 s，12 句 ~0.1 s，512 维。进程内首次 `load()` 会失败（`hasAvailableAssets = false`，`Failed to locate embedding model`），但这不是“需要预先延迟”：2026-11-20 真机 A/B（见下）显示，先等 300 ms 再首次调用仍 5/5 失败；首次调用失败后 50–100 ms 重试即成功。探测器已改为首次失败后每 100 ms 重试、2 s 截止；不使用 `requestAssets()`（首次实测 5.5 s，可能触发资源检查/下载，且超过 runner 的 3 s 超时）。
 - **区分度**（余弦距离，越小越近；探测器详情里的"近<远"即这 3 组）：
 
 | 锚句 → 近义 / 无关 | NLEmbedding 句向量 | NLContextualEmbedding（均值池化） |
@@ -97,5 +97,26 @@
 | NLEmbedding 中文 | 可用 | 首次调用返回 nil，重试成功；近<远 2/3：0.372<0.443，0.486<0.605，0.469>0.401 | 0.08 s |
 | NLContextualEmbedding 中文 | 可用 | 第 1 次 hasAvailableAssets=false，load 失败：Failed to locate embedding model；第 2 次加载成功（hasAvailableAssets=true，距首次 395 ms）；维度 512；近<远 2/3：0.091<0.239，0.371<0.385，0.365>0.350 | 0.57 s |
 ```
+
+### NLContextualEmbedding 真机 A/B（2026-11-20）
+
+用独立 Bundle ID 的临时探针 App（`ai.minimate.app.m0probe`，已卸载）在同一台 iPhone 17,2 / iOS 27.2 上跑了 5 轮 × 8 个场景；每次都是全新进程，跑完直接 `exit(0)`。结论：首次 `load()` 失败是“每个进程第一次查询触发 NaturalLanguage 资源初始化”的一次性状态，**不需要预先等待 300 ms**。
+
+| 场景 | 结果 |
+|---|---|
+| 首次调用前先等 300 ms | 5/5 失败（`hasAvailableAssets=false`，`Failed to locate embedding model`，~11–15 ms） |
+| 首次失败后 50 ms 重试 | 5/5 第 2 次成功，总耗时 88–104 ms |
+| 首次失败后 100 ms 重试 | 4/5 第 2 次成功、1/5 第 1 次成功；总 38–167 ms |
+| 现有 300 ms × 3 | 5/5 第 2 次成功，总 378–400 ms |
+| 先 `requestAssets()` 再 `load()` | 5/5 成功；首次 5.5 s，之后 4–15 ms |
+| 与 `NLEmbedding` 并发 | 5/5 成功（3 次第 2 次、2 次第 1 次）；并发不是失败原因 |
+| 先调 `NLEmbedding` 再 `load()` | 5/5 第 1 次成功（NLEmbedding 首次调用会预热共享资源） |
+
+补充观察：
+
+- 首次失败后，`hasAvailableAssets` 在约 50 ms 内翻为 true；但有 2 次首次 `load()` 成功时该值仍为 false，所以**不能把 `hasAvailableAssets` 当作是否重试的 gate**，应以 `load()` 结果为准。
+- `requestAssets()` 首次调用实测 5.5 s（后续 4–15 ms），可能触发资源检查/下载；超过 `DiagnosticsRunner` 的 3 s 超时，不适合放在诊断探测里。
+- 因此探测器改为：首次立即尝试；失败后每 100 ms 重试，截止 2 s；记录尝试次数与首次耗时。正常路径约 140 ms 内完成，比原来的 300 ms 重试快 ~250 ms。
+- 上表旧导出中的“距首次 395 ms”来自旧的 300 ms 重试版本；新探测器导出的文案会显示实际尝试次数与耗时。
 
 > 注（2026-11-20 实测）：付费账号下"签名到期、App 打不开"的状态无法模拟——iOS 设置无描述文件管理入口（付费证书在信任链内，不像免费账号有信任条目）；Xcode 27 的 Window 菜单也已移除设备描述文件管理；吊销 Apple Development 证书后 App 仍可正常启动，说明 iOS 启动校验是本地的（内嵌 profile + 签名链），不做吊销检查。真正的到期→重签全链路只能等 11 个月后自然到期或换回免费账号时验证。

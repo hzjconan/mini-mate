@@ -50,18 +50,22 @@ public struct NLContextualEmbeddingProbe: CapabilityProbe {
 
     public func run() async throws -> CapabilityResult {
         let language = NLLanguage.simplifiedChinese
-        // Early in a process the first attempt reports no assets and load() fails even though the
-        // model is installed; an immediate retry also fails, one ~300 ms later succeeds (001 research.md).
+        // iOS 27: the first NLContextualEmbedding.load() in a process fails even with the model
+        // installed (hasAvailableAssets also reads false). The failed call triggers initialization;
+        // waiting before the first call does not help, but a retry ~100 ms later succeeds
+        // (001 research.md, on-device A/B). Retry until a 2 s deadline, well inside the runner's 3 s.
         var notes: [String] = []
         var loaded: NLContextualEmbedding?
+        var attempts = 0
         let start = ContinuousClock.now
-        for attempt in 1...4 {
-            if attempt > 1 { try await Task.sleep(for: .milliseconds(300)) }
+        let deadline = start + .seconds(2)
+        while ContinuousClock.now < deadline {
+            attempts += 1
             guard let candidate = NLContextualEmbedding(language: language) else {
                 return CapabilityResult(
                     id: id,
                     status: .unavailable(reason: "无简体中文上下文嵌入模型"),
-                    detail: nil,
+                    detail: notes.isEmpty ? nil : notes.joined(separator: "；"),
                     duration: .zero
                 )
             }
@@ -69,13 +73,19 @@ public struct NLContextualEmbeddingProbe: CapabilityProbe {
             do {
                 try candidate.load()
                 loaded = candidate
-                if attempt > 1 {
-                    notes.append("第 \(attempt) 次加载成功（hasAvailableAssets=\(assetsFlag)，距首次 \(start.duration(to: .now).formatted(.units(allowed: [.milliseconds])))）")
+                if attempts > 1 {
+                    notes.append("首次失败后第 \(attempts) 次加载成功（hasAvailableAssets=\(assetsFlag)，距首次 \(start.duration(to: .now).formatted(.units(allowed: [.milliseconds])))）")
                 }
                 break
             } catch {
-                notes.append("第 \(attempt) 次 hasAvailableAssets=\(assetsFlag)，load 失败：\(error.localizedDescription)")
+                if attempts <= 3 {
+                    notes.append("第 \(attempts) 次 hasAvailableAssets=\(assetsFlag)，load 失败：\(error.localizedDescription)")
+                }
             }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        if loaded == nil {
+            notes.append("共 \(attempts) 次加载失败")
         }
         guard let embedding = loaded else {
             return CapabilityResult(
