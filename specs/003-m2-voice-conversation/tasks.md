@@ -20,7 +20,7 @@ description: "M2 语音对话的任务列表"
 - [ ] T002 [P] `.gitignore` 增加 `Assets/voice-samples/*.wav`
 - [ ] T003 [P] `App/MiniMate/Info.plist` 增加 `NSMicrophoneUsageDescription`
 - [ ] T004 [P] `MMSecurity/VendorID.swift` 按候选厂商更新（`aliyun`、`volcengine`、`openai`）
-- [ ] T005 [P] `Kit/Sources/MMConversation/Resources/persona.md`：写入人格设定（需先解决 spec.md Assumptions 中的人格 [NEEDS CLARIFICATION]）
+- [ ] T005 [P] `Kit/Sources/MMConversation/Resources/persona.md`：写入人格设定：名字"小瓜"，呆萌、俏皮、话不多，称呼用户为"你"，每次回答 1–3 句（spec.md Assumptions）
 
 ---
 

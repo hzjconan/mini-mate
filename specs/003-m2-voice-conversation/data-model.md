@@ -51,7 +51,7 @@
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `name` | `String` | 默认"小咪"（待用户确认） |
+| `name` | `String` | "小瓜" |
 | `description` | `String` | 性格与说话风格 |
 | `addressUserAs` | `String` | 对用户的称呼 |
 | `rules` | `[String]` | 如"每次回答 1–3 句""不使用表情符号" |

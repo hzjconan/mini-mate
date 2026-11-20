@@ -51,7 +51,7 @@ description: "M3 记忆、离线与预置短句的任务列表"
 - [ ] T010 [P] [US1] `Kit/Tests/MMMemoryTests/SessionContextBuilderTests.swift`：contracts/session-context.md C-1–C-6 与预算边界
 - [ ] T011 [P] [US1] `Kit/Tests/MMMemoryTests/FactMergerTests.swift`：data-model.md 合并规则四种情况
 - [ ] T012 [P] [US1] `Kit/Tests/MMMemoryTests/MoodTrendTests.swift`
-- [ ] T013 [P] [US1] `Kit/Tests/MMMemoryTests/MemoryMaintenanceTests.swift`：用假 `TextLLMProvider` 验证 M-1–M-5（重试、未知类别、触发时机、rolling 不抽取、skip 轮次）
+- [ ] T013 [P] [US1] `Kit/Tests/MMMemoryTests/MemoryMaintenanceTests.swift`：用假 `TextLLMProvider` 验证 M-1–M-5（重试、未知类别、触发时机、rolling 不抽取）
 
 ### Implementation
 

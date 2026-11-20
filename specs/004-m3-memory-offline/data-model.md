@@ -30,7 +30,6 @@
 | `assistantEmotions` | `[String]` | 本轮出现过的 `EmotionTag` |
 | `wasInterrupted` | `Bool` | |
 | `answerLatencyMs` | `Int?` | M_answer |
-| `skipFactExtraction` | `Bool` | 用户要求"别记这个"时为 true |
 
 ### SessionSummary
 

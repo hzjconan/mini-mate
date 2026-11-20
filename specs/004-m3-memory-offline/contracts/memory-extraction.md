@@ -25,8 +25,7 @@ public protocol TextLLMProvider: Sendable {
    category 只能是 profile / preference / relationship / event / other。
    key 用小写英文点分路径表示主题，如 pet.cat.name、study.exam。
 3. obsolete：列出已知事实中，被这段对话明确否定或已经过时的 key。
-4. 标记为 skip 的轮次不得抽取任何事实。
-5. 不要抽取关于助手自己的内容；不要猜测。
+4. 不要抽取关于助手自己的内容；不要猜测。
 ```
 
 **user**
@@ -39,7 +38,7 @@ public protocol TextLLMProvider: Sendable {
 【对话记录】
 #1 用户（语气：tired）：……
 #1 助手：……
-#2 用户（skip）：……
+#2 用户（语气：calm）：……
 ...
 ```
 
