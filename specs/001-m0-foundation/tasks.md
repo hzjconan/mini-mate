@@ -97,7 +97,7 @@ description: "M0 工程基座与能力探测的任务列表"
 
 ## Phase 6: Polish
 
-- [ ] T026 [P] 更新 `AGENTS.md` 中的构建与测试命令（若实际命令与文档不同）
+- [x] T026 [P] 更新 `AGENTS.md` 中的构建与测试命令（若实际命令与文档不同）
 - [ ] T027 按 quickstart 第五节完成全部验收勾选，并在 `research.md` 填完实测表
 
 ---

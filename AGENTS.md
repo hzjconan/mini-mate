@@ -18,11 +18,19 @@
 # 纯逻辑单元测试（macOS）
 cd Packages/MiniMateKit && swift test
 
+# App 模拟器编译验证（无签名，命令行可用）
+xcodebuild -project App/MiniMate.xcodeproj -scheme MiniMate \
+  -destination 'generic/platform=iOS Simulator' build CODE_SIGNING_ALLOWED=NO
+
+# 包内模块单独按 iOS 编译（验证 #if os(iOS) 分支）
+cd Packages/MiniMateKit && xcodebuild -scheme MMDiagnostics \
+  -destination 'generic/platform=iOS' build CODE_SIGNING_ALLOWED=NO
+
 # M2a 厂商验证（Key 只通过环境变量传入）
 cd Packages/MiniMateKit && swift run mm-probe tone-suite --vendor qwen
 ```
 
-App 构建与真机安装在 Xcode 中进行，步骤见 `specs/001-m0-foundation/quickstart.md`。
+App 构建与真机安装在 Xcode 中进行（工程为 objectVersion 77 文件系统同步组，`App/MiniMate/` 下新增文件自动纳入 target），步骤见 `specs/001-m0-foundation/quickstart.md`。签名需在 Xcode 的 Signing & Capabilities 中选择 Personal Team。
 
 ## 约定
 
