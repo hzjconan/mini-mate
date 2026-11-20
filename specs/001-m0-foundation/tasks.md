@@ -56,13 +56,13 @@ description: "M0 工程基座与能力探测的任务列表"
 
 ### Tests（先写，确认失败）
 
-- [ ] T011 [P] [US2] `Packages/MiniMateKit/Tests/MMDiagnosticsTests/CapabilityReportTests.swift`：`markdown()` 输出表头、行顺序、`unavailable`/`error` 原因转义（含 `|` 字符）
-- [ ] T012 [P] [US2] `Packages/MiniMateKit/Tests/MMDiagnosticsTests/DiagnosticsRunnerTests.swift`：用假探测器验证并发执行、单项超时转为 `.error`、单项抛错不影响其他项
+- [x] T011 [P] [US2] `Packages/MiniMateKit/Tests/MMDiagnosticsTests/CapabilityReportTests.swift`：`markdown()` 输出表头、行顺序、`unavailable`/`error` 原因转义（含 `|` 字符）
+- [x] T012 [P] [US2] `Packages/MiniMateKit/Tests/MMDiagnosticsTests/DiagnosticsRunnerTests.swift`：用假探测器验证并发执行、单项超时转为 `.error`、单项抛错不影响其他项
 
 ### Implementation
 
-- [ ] T013 [P] [US2] `Sources/MMDiagnostics/CapabilityModels.swift`：`CapabilityID`、`CapabilityStatus`、`CapabilityResult`、`CapabilityReport`（见 data-model.md）
-- [ ] T014 [US2] `Sources/MMDiagnostics/DiagnosticsRunner.swift`：`withTaskGroup` 并发、单项 3 s 超时（依赖 T013）
+- [x] T013 [P] [US2] `Sources/MMDiagnostics/CapabilityModels.swift`：`CapabilityID`、`CapabilityStatus`、`CapabilityResult`、`CapabilityReport`（见 data-model.md）
+- [x] T014 [US2] `Sources/MMDiagnostics/DiagnosticsRunner.swift`：`withTaskGroup` 并发、单项 3 s 超时（依赖 T013）
 - [ ] T015 [P] [US2] `Sources/MMDiagnostics/Probes/FoundationModelsProbe.swift`：`SystemLanguageModel.default.availability` 各分支映射为中文原因；检查简体中文支持
 - [ ] T016 [P] [US2] `Sources/MMDiagnostics/Probes/SpeechProbes.swift`：`SpeechTranscriber` zh-CN（supported / installed）、`SpeechDetector` 可用性
 - [ ] T017 [P] [US2] `Sources/MMDiagnostics/Probes/NLEmbeddingProbe.swift`：中文句向量是否非 nil + 近义句距离冒烟测试
