@@ -1,0 +1,12 @@
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+
+# Build artifacts
+DerivedData/
+.build/
+.swiftpm/
+
+# Local secrets
+.env*
+Secrets*.plist

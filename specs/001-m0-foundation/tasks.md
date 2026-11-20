@@ -17,7 +17,7 @@ description: "M0 工程基座与能力探测的任务列表"
 
 ## Phase 1: Setup
 
-- [ ] T001 新建仓库根 `.gitignore`（Xcode `xcuserdata/`、`DerivedData/`、`.build/`、`.swiftpm/`、`*.xcuserstate`、`.env*`、`Secrets*.plist`）
+- [x] T001 新建仓库根 `.gitignore`（Xcode `xcuserdata/`、`DerivedData/`、`.build/`、`.swiftpm/`、`*.xcuserstate`、`.env*`、`Secrets*.plist`）
 - [ ] T002 在 Xcode 26 中创建 iOS App 工程 `App/MiniMate.xcodeproj`（SwiftUI、Swift 6、最低 iOS 26、仅 iPhone、Bundle ID `ai.minimate.app.<name>`）
 - [ ] T003 创建本地包 `Packages/MiniMateKit/Package.swift`：platforms iOS 26 / macOS 26；targets `MMCore`、`MMDiagnostics`、`MMSecurity` 及对应测试 target；开启 Swift 6 严格并发
 - [ ] T004 将 `MiniMateKit` 以本地包形式加入 App 工程，App target 依赖 `MMCore`、`MMDiagnostics`、`MMSecurity`
