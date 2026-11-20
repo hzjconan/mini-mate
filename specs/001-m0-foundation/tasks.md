@@ -42,7 +42,7 @@ description: "M0 工程基座与能力探测的任务列表"
 
 - [x] T008 [US1] 按 quickstart 第一节在真机安装；确认 Signing & Capabilities 中无任何 capability 声明
 - [x] T009 [US1] 在 `HomeView` 中加入一个本地计数器（`@AppStorage`），用于验证重签后数据保留
-- [ ] T010 [US1] 等签名到期或在设备上删除描述文件模拟到期，按 quickstart 第二节重签，记录耗时到 `specs/001-m0-foundation/research.md`
+- [x] T010 [US1] 等签名到期或在设备上删除描述文件模拟到期，按 quickstart 第二节重签，记录耗时到 `specs/001-m0-foundation/research.md`（实测：到期状态在付费账号下不可模拟，见 research.md 注；⌘R 原地重签 ~30 s 且数据保留）
 
 **Checkpoint**：SC-001 达成
 
