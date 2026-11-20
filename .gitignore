@@ -10,3 +10,6 @@ DerivedData/
 # Local secrets
 .env*
 Secrets*.plist
+
+# macOS
+.DS_Store
