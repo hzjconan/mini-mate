@@ -6,7 +6,7 @@
 
 ## Summary
 
-建立后续所有里程碑共用的工程结构：一个 SwiftUI iOS App 作为组合根，一个本地 Swift Package `MiniMateKit` 承载全部业务模块（纯逻辑模块可在 macOS 测试）。在此基础上交付三件事：免费签名真机安装与重签流程、一次性能力探测页（验证 V1–V3）、Keychain 密钥存储。
+建立后续所有里程碑共用的工程结构：一个 SwiftUI iOS App 作为组合根，一个本地 Swift Package `MiniMateKit` 承载全部业务模块（纯逻辑模块可在 macOS 测试）。在此基础上交付三件事：开发者账号签名真机安装与重签流程、一次性能力探测页（验证 V1–V3）、Keychain 密钥存储。
 
 ## Technical Context
 
@@ -24,7 +24,7 @@
 
 **Performance Goals**：能力探测全部完成 < 5 s
 
-**Constraints**：只使用免费 Apple ID 支持的 capability；不联网
+**Constraints**：不声明任何付费账号独有的 capability；不联网
 
 **Scale/Scope**：单用户、单设备；本阶段 3 个页面（首页、能力探测、设置）
 

@@ -30,7 +30,7 @@ cd Packages/MiniMateKit && xcodebuild -scheme MMDiagnostics \
 cd Packages/MiniMateKit && swift run mm-probe tone-suite --vendor qwen
 ```
 
-App 构建与真机安装在 Xcode 中进行（工程为 objectVersion 77 文件系统同步组，`App/MiniMate/` 下新增文件自动纳入 target），步骤见 `specs/001-m0-foundation/quickstart.md`。签名需在 Xcode 的 Signing & Capabilities 中选择 Personal Team。
+App 构建与真机安装在 Xcode 中进行（工程为 objectVersion 77 文件系统同步组，`App/MiniMate/` 下新增文件自动纳入 target），步骤见 `specs/001-m0-foundation/quickstart.md`。签名需在 Xcode 的 Signing & Capabilities 中选择开发者团队（当前为付费个人会员）。
 
 ## 约定
 

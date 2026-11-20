@@ -6,7 +6,7 @@
 
 | Feature | 里程碑 | 目标 | 状态 | 依赖 |
 |---|---|---|---|---|
-| [001-m0-foundation](./001-m0-foundation/spec.md) | M0 | 工程基座、免费签名与重签、能力探测（V1–V3）、Keychain | Draft | — |
+| [001-m0-foundation](./001-m0-foundation/spec.md) | M0 | 工程基座、签名与重签、能力探测（V1–V3）、Keychain | Draft | — |
 | [002-m1-presence](./002-m1-presence/spec.md) | M1 | 感知层 + 情绪状态机 + RealityKit 形象："它在看我，且在回应我" | Draft | 001 |
 | [003-m2-voice-conversation](./003-m2-voice-conversation/spec.md) | M2 | M2a 厂商验证（方案 B / C）+ M2b 免唤醒语音对话、语气理解、情感 TTS、回声消除与打断 | Draft | 001；US6 依赖 002 |
 | [004-m3-memory-offline](./004-m3-memory-offline/spec.md) | M3 | 跨会话记忆、离线模式、预合成短句与垫场、记忆管理 | Draft | 003 |

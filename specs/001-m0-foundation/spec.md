@@ -6,21 +6,21 @@
 
 **Status**: Draft
 
-**Input**: `docs/tech-selection.md` v3.1 第 7 章 M0："免费账号签名、真机跑通空工程；一次性能力探测"
+**Input**: `docs/tech-selection.md` v3.2 第 7 章 M0："开发者账号签名、真机跑通空工程；一次性能力探测"
 
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - 在自己的 iPhone 上装上并持续使用 App (Priority: P1)
 
-我用免费 Apple ID 把 MiniMate 装到 iPhone 16 Pro Max 上；7 天签名到期后，我能按一份固定步骤在几分钟内重签，App 内的数据不丢。
+我用开发者账号把 MiniMate 装到 iPhone 16 Pro Max 上；签名到期后，我能按一份固定步骤在几分钟内重签，App 内的数据不丢。
 
-**Why this priority**：签名是最大的现实门槛（tech-selection 第 1 章第 8 条）。装不上或每周重签很痛苦，后面一切都无从谈起。
+**Why this priority**：签名是最大的现实门槛（tech-selection 第 1 章第 8 条）。装不上或重签流程不通，后面一切都无从谈起。
 
 **Independent Test**：在真机安装空工程，写入一条测试数据；等签名过期（或手动删除描述文件模拟），按 quickstart 重签，确认 App 可启动且测试数据仍在。
 
 **Acceptance Scenarios**:
 
-1. **Given** 一台已开启开发者模式的 iPhone 和一个免费 Apple ID，**When** 按 quickstart 在 Xcode 中构建运行，**Then** App 在真机启动并显示首页。
+1. **Given** 一台已开启开发者模式的 iPhone 和一个开发者账号，**When** 按 quickstart 在 Xcode 中构建运行，**Then** App 在真机启动并显示首页。
 2. **Given** 签名已过期、App 无法打开，**When** 按 quickstart 的重签步骤操作，**Then** App 可再次打开，之前写入的本地数据仍在。
 3. **Given** 工程已建好，**When** 在 Mac 上执行 `swift test`，**Then** 共享 Swift Package 的测试可以运行并通过。
 
@@ -60,7 +60,7 @@
 ### Edge Cases
 
 - 设备未开启开发者模式，或首次安装时未在"设置 > 通用 > VPN 与设备管理"中信任开发者证书。
-- 免费账号 7 天内创建的 App ID 数量已达上限。
+- 账号的设备注册名额或 App ID 数量已达上限（2026-11-20 实测遇到：免费账号 iPhone 注册名额满 → 购入付费会员）。
 - Apple Intelligence 未开启、仍在下载模型、或因地区/语言不可用——探测须区分这几种原因。
 - `SpeechTranscriber` 支持 zh-CN，但对应语言资源尚未下载。
 - `NLEmbedding.sentenceEmbedding(for: .simplifiedChinese)` 返回 nil。
@@ -70,7 +70,7 @@
 ### Functional Requirements
 
 - **FR-001**：工程 MUST 由一个 iOS App target 与一个本地 Swift Package（`MiniMateKit`）组成；不依赖设备的模块 MUST 能在 macOS 上 `swift test`。
-- **FR-002**：App MUST 能用免费 Apple ID 签名安装到真机，且不声明任何免费账号不支持的 capability。
+- **FR-002**：App MUST 能用开发者账号签名安装到真机，且不声明任何付费账号独有的 capability。
 - **FR-003**：App MUST 提供能力探测页，至少包含：Foundation Models 可用性（含不可用原因）、`SpeechTranscriber` 是否支持 zh-CN 及资源是否已安装、`SpeechDetector` 是否可用、`NLEmbedding` 中文句向量是否可用、ARKit 人脸追踪是否支持、设备型号与系统版本。
 - **FR-004**：每一项探测 MUST 相互独立，单项失败不影响其他项，结果包含状态与原因。
 - **FR-005**：探测结果 MUST 可导出为纯文本（Markdown 表格）。
@@ -97,6 +97,6 @@
 ## Assumptions
 
 - 开发机为 Apple Silicon Mac，安装 Xcode 26；设备为 iPhone 16 Pro Max、iOS 26。
-- 使用免费 Apple ID；不购买开发者账号。
+- 使用付费个人开发者账号（2026-11-20 购入；此前为免费 Apple ID，因设备注册名额满而升级）。
 - 本阶段不接任何云端服务，API Key 只做存储，不发起调用。
 - 探测页是开发用的诊断界面，后续保留在设置中，不追求视觉设计。

@@ -6,21 +6,21 @@
 
 - Apple Silicon Mac，Xcode 26
 - iPhone 16 Pro Max，iOS 26，数据线
-- 一个免费 Apple ID，已在 Xcode > Settings > Accounts 中登录
+- 一个开发者账号（个人付费会员），已在 Xcode > Settings > Accounts 中登录
 
 ## 一、首次安装
 
 1. iPhone：设置 > 隐私与安全性 > 开发者模式，打开并重启。
 2. Xcode 打开 `App/MiniMate.xcodeproj`，选中 `MiniMate` target > Signing & Capabilities：
-   - Team 选择你的 Personal Team；
-   - Bundle Identifier 保持 `ai.minimate.app.<你的名字>`（免费账号要求全局唯一）。
+   - Team 选择你的开发者团队；
+   - Bundle Identifier 保持 `ai.minimate.app.cucumber`（需全局唯一）。
 3. 连接 iPhone，选中设备，⌘R 运行。
 4. 首次启动提示"不受信任的开发者"时：iPhone 设置 > 通用 > VPN 与设备管理 > 选择你的 Apple ID > 信任。
 5. 再次运行，App 显示首页即成功。
 
-## 二、每周重签（SC-001，目标 ≤ 5 分钟）
+## 二、重签（SC-001，目标 ≤ 5 分钟）
 
-签名有效期 7 天。到期后 App 点开即闪退或提示无法验证。
+付费账号的描述文件约一年有效。到期或验证失败时 App 点开即闪退或提示无法验证。演练时可在 iPhone 上删除描述文件模拟到期（设置 > 通用 > VPN 与设备管理）。
 
 1. 连接 iPhone，打开 Xcode 中的工程。
 2. 直接 ⌘R 运行（Xcode 会自动续签描述文件）。
@@ -29,7 +29,7 @@
 
 **不要**删除 App 再重装——那会清空本地数据。
 
-**建议**：在日历里设每周固定提醒。
+**建议**：在日历里设到期前提醒（付费账号约一年一次；若未来改回免费账号则每周一次）。
 
 ## 三、运行能力探测
 

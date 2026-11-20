@@ -36,11 +36,11 @@ description: "M0 工程基座与能力探测的任务列表"
 
 ## Phase 3: User Story 1 - 真机安装与重签 (P1) 🎯 MVP
 
-**Goal**：用免费 Apple ID 在真机安装，并跑通一次重签。
+**Goal**：用开发者账号在真机安装，并跑通一次重签。
 
 **Independent Test**：quickstart 第一、二节。
 
-- [ ] T008 [US1] 按 quickstart 第一节在真机安装；确认 Signing & Capabilities 中无免费账号不支持的 capability
+- [x] T008 [US1] 按 quickstart 第一节在真机安装；确认 Signing & Capabilities 中无任何 capability 声明
 - [x] T009 [US1] 在 `HomeView` 中加入一个本地计数器（`@AppStorage`），用于验证重签后数据保留
 - [ ] T010 [US1] 等签名到期或在设备上删除描述文件模拟到期，按 quickstart 第二节重签，记录耗时到 `specs/001-m0-foundation/research.md`
 

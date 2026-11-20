@@ -1,8 +1,8 @@
-# MiniMate 技术选型文档（v3.1）
+# MiniMate 技术选型文档（v3.2）
 
 | 项目 | 内容 |
 |---|---|
-| 文档状态 | v3.1。已确定对话架构为方案 B（实时语音模型只出文字 + 情感 TTS），方案 C 为备选；剩余未决项集中在第 9 章「待验证项」 |
+| 文档状态 | v3.2。已确定对话架构为方案 B（实时语音模型只出文字 + 情感 TTS），方案 C 为备选；剩余未决项集中在第 9 章「待验证项」 |
 | 适用阶段 | MVP / 个人自用 |
 | 目标平台 | iOS 26+（仅 iPhone） |
 | 参考设备 | iPhone 16 Pro Max（A18 Pro / 8GB / TrueDepth） |
@@ -41,10 +41,10 @@
 | 约束 | 具体限制 | 对设计的影响 |
 |---|---|---|
 | 内存 | 8GB 机型单 App 实际可用约 3–4GB，超出会被 jetsam 杀进程 | 自建端侧 3B 4bit（约 2GB 权重 + KV cache）逼近警戒线 |
-| entitlement | 自建 3B 模型大概率需要 `increased-memory-limit`；免费个人团队是否支持需确认 | 优先 Foundation Models 的理由之一 |
+| entitlement | 自建 3B 模型大概率需要 `increased-memory-limit`；付费账号可申请（M4 时实测上限） | 优先 Foundation Models 的理由之一 |
 | 热 | 持续推理 2–3 分钟后降频 | 不设计长时间连续推理；视觉任务限流 |
 | 后台 | 锁屏/切后台后摄像头、麦克风与推理均停止 | 不做"后台陪伴"；切后台即断开实时会话 |
-| 签名 | 免费 Apple ID 仅 7 天有效期，需连 Mac 重签；部分能力（如 Push）不可用 | 已决定先用免费方案，每周固定重签 |
+| 签名 | 付费个人会员约 1 年有效期，到期 Xcode 一键续签；免费账号仅 7 天且设备注册名额受限、无法在线删除 | 2026-11-20 已购入付费会员（免费账号设备名额实测打满） |
 | 网络 | 云端调用依赖公网；实时语音为长连接 WebSocket | 必须有断网/弱网降级与重连路径 |
 | 摄像头 | ARKit 运行时独占摄像头 | 所有视觉任务都跑在 `ARFrame` 上，不另开 `AVCaptureSession` |
 | 外放回声 | 支架外放，扬声器声音会被麦克风拾取 | 回声消除是免唤醒的前提（4.7） |
@@ -241,7 +241,7 @@
 |---|---|---|
 | 运行时 | **Apple Foundation Models**（系统自带约 3B 模型）：零下载；跑在系统进程，不占 App 内存额度（需确认）；流式、`@Generable` 结构化输出、tool calling、`prewarm()` | MLX Swift（再备选 llama.cpp/Metal）：需自行处理分词、KV cache、采样；3B 逼近内存警戒线 |
 | 模型 | 不可选 | Qwen3-1.7B / 4B（**必须关闭思考模式**）、Gemma 3n E2B/E4B；M4 时再看当时最新版本 |
-| 限制 | 上下文约 4k、拿不到 logprob、不能换模型 | 需确认免费签名能否使用 `increased-memory-limit` |
+| 限制 | 上下文约 4k、拿不到 logprob、不能换模型 | 付费账号可申请 `increased-memory-limit`（M4 时实测上限） |
 | 量化 | — | 4bit（1B ≈ 0.7 GB，3B ≈ 2 GB 权重） |
 
 **硬门槛**：Foundation Models 依赖 Apple Intelligence，需确认设备在当前地区与 Apple ID 设置下能否开启、中文是否支持（M0 一行代码验证）。
@@ -363,7 +363,7 @@ protocol AvatarRenderer {
 
 | 阶段 | 内容 | 验收标准 |
 |---|---|---|
-| **M0** | 免费账号签名、真机跑通空工程；一次性能力探测 | ① 安装到设备，并走通一次 7 天到期后的重签；② 打印并记录：`SystemLanguageModel.default.availability`、`SpeechTranscriber.supportedLocales` 是否含 zh-CN、`SpeechDetector` 是否可用、`NLEmbedding.sentenceEmbedding(for: .simplifiedChinese)` 是否非 nil |
+| **M0** | 开发者账号签名、真机跑通空工程；一次性能力探测 | ① 安装到设备，并走通一次签名到期后的重签（可删除描述文件模拟）；② 打印并记录：`SystemLanguageModel.default.availability`、`SpeechTranscriber.supportedLocales` 是否含 zh-CN、`SpeechDetector` 是否可用、`NLEmbedding.sentenceEmbedding(for: .simplifiedChinese)` 是否非 nil |
 | **M1** | 感知层 + 情绪状态机 v0 + 形象渲染 | ① 素材管线打通：一个 52 blendShape 模型在 RealityKit 中可被逐个系数驱动，并能播放动作片段；② 状态机 6 个状态可切换，用户笑时形象以自己的方式回应（非复制）；③ M_track < 100 ms，主观"它在看我，且在回应我" |
 | **M2a**（M2 第一周） | 方案 B 厂商能力验证（不接形象，命令行/简单 UI 即可） | ① 至少一家厂商满足 4.3 的三个前提；② 语气测试：同一句话用不同语气说，`<user:…>` 与回答内容有可辨识差异；③ 输出 `<emo>` → TTS 情感映射表；不满足则切到方案 C |
 | **M2b** | 对话引擎全链路：两道收音闸门、回声消除、打断、标签解析、分句、情感 TTS、口型 | ① 支架外放连续 10 轮，无一轮把自己的声音当输入，无误打断；② 播放中插话可打断，M_bargein < 300 ms；③ 电视背景声下 5 分钟不看屏幕，不产生误触发对话；④ 产出 M_feedback / M_answer 的 p50/p90 基准与候选厂商对比，据此定厂商 |
@@ -426,7 +426,7 @@ M1 与 M2 可以并行；M1 不应跳过，它是产品体验的地基。
 | V9 | 视线软闸门对电视/旁人说话的过滤效果 | 电视背景声下 5 分钟不看屏幕 | M2b | 提高阈值 / M3 评估个人声纹确认 |
 | V10 | VRM → USDZ 后 52 个 blendShape 与动作能否在 RealityKit 中驱动 | 选一个 Perfect Sync 模型走完整管线 | M1 第一周 | 自建简化模型 / Live2D |
 | V11 | `userFaceTrackingEnabled` 下前置人脸追踪的质量与帧率 | 与 `ARFaceTrackingConfiguration` 对比 | 进入看图功能前 | 看图时短暂切换 session |
-| V12 | 免费个人团队能否使用 `increased-memory-limit` | 在 Xcode 中添加该能力并签名 | M4 启动时（仅走 MLX 时） | 只用 ≤ 1.7B 模型 |
+| V12 | 付费账号 `increased-memory-limit` 的实际可用内存上限（会员已购，前提解决） | 在 Xcode 中添加该能力并签名 | M4 启动时（仅走 MLX 时） | 只用 ≤ 1.7B 模型 |
 
 ---
 
@@ -446,7 +446,7 @@ M1 与 M2 可以并行；M1 不应跳过，它是产品体验的地基。
 | MediaPipe LLM Inference、WhisperKit | 见 9.1 |
 | 实时云端视频流理解 | 流量与延迟成本过高 |
 | 后台/锁屏常驻 | 系统限制 |
-| 主动推送提醒 | 免费签名不支持 Push Notifications |
+| 主动推送提醒 | 产品定位不需要主动打扰（付费账号已解锁 Push，将来需要时可加） |
 | 自建后端代理 | 个人自用无必要；**正式上架前为必须项**，见下方备注 |
 
 > **备注：自建后端代理**
@@ -488,3 +488,4 @@ M1 与 M2 可以并行；M1 不应跳过，它是产品体验的地基。
 | v2 | 吸收第一轮研判：ARKit 定案、Q2 算术勘误、人体姿态移除、补 Foundation Models / 回声消除 / 实时语音模型、TTS 统一音色、路由去掉 logprob、引入"陪伴而非镜像" |
 | v3 | 重写：情绪状态机独立成节；对话引擎抽象为可替换实现；新增标签契约、会话记忆上限；延迟指标拆为 M_feedback / M_answer，M_answer 1.5 s 改为 M4 门槛；形象素材管线列为 M1 首要风险；能力探测前移到 M0；待验证项统一成表 |
 | v3.1 | 明确语音对话需求（免唤醒、听得出语气、预置音色 + 情绪变化、支架外放短聊）。对话架构定为方案 B，C 备选，纯级联降为末位；新增收音两道闸门（4.4）；标签扩展为 `<user>` / `<emo>` / `<act>`，`<emo>` 同时驱动 TTS 情感参数；状态机加入用户语气与口型；会话记忆改为适配实时会话（服务端会话内持有、客户端注入与重建）；M2 拆为 M2a 厂商能力验证与 M2b 全链路；厂商选型条件与待验证项相应更新 |
+| v3.2 | 签名约束更新：2026-11-20 真机安装时免费账号 iPhone 注册名额打满（跨项目共享、无法在线删除），购入付费个人会员。签名 7 天改为约一年，`increased-memory-limit` 可用（V12 前提解决），Push 技术障碍消除（产品定位仍不主动推送） |

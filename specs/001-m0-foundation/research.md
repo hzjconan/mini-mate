@@ -12,11 +12,11 @@
 - **Rationale**：宪章 V 要求纯逻辑可在 macOS 上 `swift test`；Package target 天然隔离模块依赖，避免循环引用。
 - **Alternatives considered**：全部放在 App target（无法在 macOS 测试）；XcodeGen / Tuist 生成工程（新增工具依赖，单人项目收益低）。
 
-### D2. 签名：免费 Apple ID
+### D2. 签名：开发者账号（2026-11-20 修订）
 
-- **Decision**：Personal Team 签名，每 7 天重签；不声明 Push、iCloud、App Groups 等 capability。
-- **Rationale**：用户已决定暂不购买开发者账号（tech-selection 2.2）。
-- **Alternatives considered**：付费账号（一年期签名、完整 capability）——记为后续可选项，触发条件是重签频率成为实际负担，或 M4 需要 `increased-memory-limit` 而免费账号不支持。
+- **Decision**：付费个人开发者账号签名；App 不声明 Push、iCloud、App Groups 等 capability。
+- **Rationale**：原计划用免费 Apple ID；真机安装当天遇到"设备注册名额已满"（免费账号的 iPhone 名额是跨项目共享的硬上限，且无法在线删除），购入个人付费会员。付费签名约一年有效，每周重签的负担消除。
+- **Alternatives considered**：免费 Apple ID（7 天签名、无付费能力）——仍可用作回退路径；本 App 不依赖任何付费 capability，换免费账号只需重新签名安装。
 
 ### D3. 测试框架：Swift Testing
 
