@@ -18,19 +18,19 @@ description: "M0 工程基座与能力探测的任务列表"
 ## Phase 1: Setup
 
 - [x] T001 新建仓库根 `.gitignore`（Xcode `xcuserdata/`、`DerivedData/`、`.build/`、`.swiftpm/`、`*.xcuserstate`、`.env*`、`Secrets*.plist`）
-- [ ] T002 在 Xcode 26 中创建 iOS App 工程 `App/MiniMate.xcodeproj`（SwiftUI、Swift 6、最低 iOS 26、仅 iPhone、Bundle ID `ai.minimate.app.<name>`）
+- [x] T002 在 Xcode 26 中创建 iOS App 工程 `App/MiniMate.xcodeproj`（SwiftUI、Swift 6、最低 iOS 26、仅 iPhone、Bundle ID `ai.minimate.app.cucumber`）
 - [x] T003 创建本地包 `Packages/MiniMateKit/Package.swift`：platforms iOS 26 / macOS 26；targets `MMCore`、`MMDiagnostics`、`MMSecurity` 及对应测试 target；开启 Swift 6 严格并发
-- [ ] T004 将 `MiniMateKit` 以本地包形式加入 App 工程，App target 依赖 `MMCore`、`MMDiagnostics`、`MMSecurity`
+- [x] T004 将 `MiniMateKit` 以本地包形式加入 App 工程，App target 依赖 `MMCore`、`MMDiagnostics`、`MMSecurity`
 
 ---
 
 ## Phase 2: Foundational
 
 - [x] T005 [P] 在 `Packages/MiniMateKit/Sources/MMCore/MMCore.swift` 建立模块占位与 `Clock` 协议（便于后续测试注入时间）
-- [ ] T006 `App/MiniMate/AppComposition.swift`：组合根，持有各模块实现；`App/MiniMate/MiniMateApp.swift` 注入
-- [ ] T007 `App/MiniMate/Screens/HomeView.swift`：首页占位 + 进入设置的入口
+- [x] T006 `App/MiniMate/AppComposition.swift`：组合根，持有各模块实现；`App/MiniMate/MiniMateApp.swift` 注入
+- [x] T007 `App/MiniMate/Screens/HomeView.swift`：首页占位 + 进入设置的入口
 
-**Checkpoint**：App 可在模拟器启动，`swift test` 可运行（0 个测试也可）
+**Checkpoint**：App 可在模拟器启动（已验证模拟器编译与 bundle 校验），`swift test` 可运行
 
 ---
 
