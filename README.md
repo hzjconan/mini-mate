@@ -7,3 +7,9 @@
 - **视觉感知 (See)**：通过手机摄像头捕捉用户的面部表情、手势动作或环境变化。
 - **听觉交互 (Hear)**：实时拾取语音与环境音，理解对话意图与情绪状态。
 - **拟人化回应 (React)**：结合语音回复与虚拟形象动画，做出自然、有温度的交互反馈。
+
+## 📚 文档
+
+- [项目原则（Constitution）](.specify/memory/constitution.md)
+- [技术选型](docs/tech-selection.md)
+- [规格与任务（按里程碑）](specs/README.md)
