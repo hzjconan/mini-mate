@@ -82,12 +82,12 @@ description: "M0 工程基座与能力探测的任务列表"
 
 ### Tests（先写，确认失败）
 
-- [ ] T021 [P] [US3] `Packages/MiniMateKit/Tests/MMSecurityTests/CredentialStoreTests.swift`：基于内存实现的 `CredentialStore` 协议测试（保存 / 读取末 4 位 / 覆盖 / 删除）；断言 `CredentialStatus` 的 `description` 不含完整 Key
+- [x] T021 [P] [US3] `Packages/MiniMateKit/Tests/MMSecurityTests/CredentialStoreTests.swift`：基于内存实现的 `CredentialStore` 协议测试（保存 / 读取末 4 位 / 覆盖 / 删除）；断言 `CredentialStatus` 的 `description` 不含完整 Key
 
 ### Implementation
 
-- [ ] T022 [US3] `Sources/MMSecurity/CredentialStore.swift`：协议 + `KeychainCredentialStore`（generic password，service `ai.minimate.credentials`，`AfterFirstUnlockThisDeviceOnly`）+ `InMemoryCredentialStore`（测试用）
-- [ ] T023 [US3] `Sources/MMSecurity/VendorID.swift`：厂商枚举（`aliyun`、`volcengine`、`openai`）
+- [x] T022 [US3] `Sources/MMSecurity/CredentialStore.swift`：协议 + `KeychainCredentialStore`（generic password，service `ai.minimate.credentials`，`AfterFirstUnlockThisDeviceOnly`）+ `InMemoryCredentialStore`（测试用）
+- [x] T023 [US3] `Sources/MMSecurity/VendorID.swift`：厂商枚举（`aliyun`、`volcengine`、`openai`）
 - [ ] T024 [US3] `App/MiniMate/Screens/SettingsView.swift`：每个厂商一行，显示状态、输入（`SecureField`）、保存、删除；入口包含"能力探测"
 - [ ] T025 [US3] 真机验证 quickstart US3，并执行 `git grep` 确认无明文
 
