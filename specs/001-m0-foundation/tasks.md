@@ -41,7 +41,7 @@ description: "M0 工程基座与能力探测的任务列表"
 **Independent Test**：quickstart 第一、二节。
 
 - [ ] T008 [US1] 按 quickstart 第一节在真机安装；确认 Signing & Capabilities 中无免费账号不支持的 capability
-- [ ] T009 [US1] 在 `HomeView` 中加入一个本地计数器（`@AppStorage`），用于验证重签后数据保留
+- [x] T009 [US1] 在 `HomeView` 中加入一个本地计数器（`@AppStorage`），用于验证重签后数据保留
 - [ ] T010 [US1] 等签名到期或在设备上删除描述文件模拟到期，按 quickstart 第二节重签，记录耗时到 `specs/001-m0-foundation/research.md`
 
 **Checkpoint**：SC-001 达成
@@ -67,7 +67,7 @@ description: "M0 工程基座与能力探测的任务列表"
 - [x] T016 [P] [US2] `Sources/MMDiagnostics/Probes/SpeechProbes.swift`：`SpeechTranscriber` zh-CN（supported / installed）、`SpeechDetector` 可用性
 - [x] T017 [P] [US2] `Sources/MMDiagnostics/Probes/NLEmbeddingProbe.swift`：中文句向量是否非 nil + 近义句距离冒烟测试
 - [x] T018 [P] [US2] `Sources/MMDiagnostics/Probes/ARKitProbe.swift`：`ARFaceTrackingConfiguration.isSupported`（`#if os(iOS)`）
-- [ ] T019 [US2] `App/MiniMate/Screens/DiagnosticsView.swift`：开始探测、逐项展示状态与原因、导出（`ShareLink` 分享 Markdown 文本）
+- [x] T019 [US2] `App/MiniMate/Screens/DiagnosticsView.swift`：开始探测、逐项展示状态与原因、导出（`ShareLink` 分享 Markdown 文本）
 - [ ] T020 [US2] 真机运行探测，导出结果写入 `specs/001-m0-foundation/research.md` 并逐项写结论；若结论推翻 tech-selection 中的假设，同步修订 `docs/tech-selection.md`
 
 **Checkpoint**：SC-002、SC-003 达成
@@ -88,7 +88,7 @@ description: "M0 工程基座与能力探测的任务列表"
 
 - [x] T022 [US3] `Sources/MMSecurity/CredentialStore.swift`：协议 + `KeychainCredentialStore`（generic password，service `ai.minimate.credentials`，`AfterFirstUnlockThisDeviceOnly`）+ `InMemoryCredentialStore`（测试用）
 - [x] T023 [US3] `Sources/MMSecurity/VendorID.swift`：厂商枚举（`aliyun`、`volcengine`、`openai`）
-- [ ] T024 [US3] `App/MiniMate/Screens/SettingsView.swift`：每个厂商一行，显示状态、输入（`SecureField`）、保存、删除；入口包含"能力探测"
+- [x] T024 [US3] `App/MiniMate/Screens/SettingsView.swift`：每个厂商一行，显示状态、输入（`SecureField`）、保存、删除；入口包含"能力探测"
 - [ ] T025 [US3] 真机验证 quickstart US3，并执行 `git grep` 确认无明文
 
 **Checkpoint**：SC-005 达成
