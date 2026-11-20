@@ -1,8 +1,8 @@
-# MiniMate 技术选型文档（v3.2）
+# MiniMate 技术选型文档（v3.3）
 
 | 项目 | 内容 |
 |---|---|
-| 文档状态 | v3.2。已确定对话架构为方案 B（实时语音模型只出文字 + 情感 TTS），方案 C 为备选；剩余未决项集中在第 9 章「待验证项」 |
+| 文档状态 | v3.2。已确定对话架构为方案 B；v3.3 回写 M0 能力探测实测结论 |（实时语音模型只出文字 + 情感 TTS），方案 C 为备选；剩余未决项集中在第 9 章「待验证项」 |
 | 适用阶段 | MVP / 个人自用 |
 | 目标平台 | iOS 26+（仅 iPhone） |
 | 参考设备 | iPhone 16 Pro Max（A18 Pro / 8GB / TrueDepth） |
@@ -244,7 +244,7 @@
 | 限制 | 上下文约 4k、拿不到 logprob、不能换模型 | 付费账号可申请 `increased-memory-limit`（M4 时实测上限） |
 | 量化 | — | 4bit（1B ≈ 0.7 GB，3B ≈ 2 GB 权重） |
 
-**硬门槛**：Foundation Models 依赖 Apple Intelligence，需确认设备在当前地区与 Apple ID 设置下能否开启、中文是否支持（M0 一行代码验证）。
+**硬门槛**：Foundation Models 依赖 Apple Intelligence。实测（2026-11-20，001 M0）：国行 iPhone 16 Pro Max 返回 `deviceNotEligible`——区域硬屏蔽，无法通过设置开启 → 本机 FM 不可用，M4 若启动只能走 MLX。
 
 ### 4.11 形象渲染
 
@@ -406,7 +406,7 @@ M1 与 M2 可以并行；M1 不应跳过，它是产品体验的地基。
 | ASR 是否引入 Whisper | 不引入；方案 B/C 下不需要独立 ASR，端侧系统识别只用于离线与快速指令 |
 | 第一版是否做端侧 LLM | 不做。由 M_answer 指标决定 M4 是否启动 |
 | MediaPipe LLM Inference | 移出选型（已向 LiteRT-LM 迁移，且 Foundation Models + MLX 已覆盖） |
-| 端侧模型型号 | 推迟至 M4；候选 Foundation Models、Qwen3、Gemma 3n |
+| 端侧模型型号 | 推迟至 M4；候选 Qwen3、Gemma 3n（Foundation Models 在本机实测不可用——国行屏蔽，见 9.2 V1） |
 | 云端看图 | 不进 MVP；session 封装预留前后摄 |
 | 形象定位 | 陪伴而非镜像；引入情绪状态机 |
 | 闭集指令 | 方案 B 下由模型输出 `<act:…>`；本地意图匹配只用于离线与可选快速通道 |
@@ -415,9 +415,17 @@ M1 与 M2 可以并行；M1 不应跳过，它是产品体验的地基。
 
 | # | 问题 | 验证方式 | 时间点 | 失败时的退路 |
 |---|---|---|---|---|
-| V1 | Foundation Models 在本机/本地区是否可用、是否支持中文 | `SystemLanguageModel.default.availability` + 中文对话试跑 | M0 | M4 走 MLX；离线意图匹配用 `NLEmbedding` |
+| V1 | Foundation Models 在本机/本地区是否可用、是否支持中文 | `SystemLanguageModel.default.availability` + 中文对话试跑 | M0 | M4 走 MLX；离线意图匹配降级关键词 + CreateML（`NLEmbedding` 简体实测返回 nil） |
 | V2 | `SpeechTranscriber` 是否支持 zh-CN | 打印 `supportedLocales` | M0 | `SFSpeechRecognizer`（on-device） |
 | V3 | `SpeechDetector` 能否独立用作人声闸门、效果如何 | 真机安静/噪音/电视背景下对比误开率 | M0–M2b | 能量阈值 + 过零率 |
+
+**实测结论（2026-11-20，001 M0 探测；iPhone 16 Pro Max 国行 CH/A / iOS 27.2）**：
+
+- **V1 ✅ 已测**：`deviceNotEligible`——国行型号硬屏蔽 Apple Intelligence，M0 结论为本机 FM 不可用（退路生效）。
+- **V2 ✅ 已测**：zh_CN 支持且资源已安装（zh_TW/zh_HK/zh_CN 均支持，已装 zh_TW、zh_CN）。
+- **V3 部分已测**：`SpeechDetector` 可构造并加入 `SpeechAnalyzer`；误开率/效果仍待 M2b 实测。
+- **NLEmbedding 简体句向量**：`sentenceEmbedding(.simplifiedChinese)` 返回 nil（非 V 表条目，但属 V1 退路依赖项）——离线意图匹配只剩关键词层 + CreateML。
+- **ARKit 人脸追踪**：`isSupported = true`（预期）。
 | V4 | 候选厂商实时接口能否只输出文字 | 查文档 + 试接（阿里百炼 Qwen-Omni、火山引擎豆包、OpenAI） | M2a | 方案 C |
 | V5 | 只出文字时模型是否仍理解语气 | 同一句话录 3 种语气，检查 `<user:…>` 与回答差异 | M2a | 方案 C（直接出语音时语气理解通常更充分）或方案 A |
 | V6 | 同厂商 TTS 是否有同一音色、支持哪些情感参数、是否返回时间戳 | 查文档 + 试合成同一句的多种情感 | M2a | 换厂商组合（实时模型与 TTS 分属两家） |
@@ -489,3 +497,4 @@ M1 与 M2 可以并行；M1 不应跳过，它是产品体验的地基。
 | v3 | 重写：情绪状态机独立成节；对话引擎抽象为可替换实现；新增标签契约、会话记忆上限；延迟指标拆为 M_feedback / M_answer，M_answer 1.5 s 改为 M4 门槛；形象素材管线列为 M1 首要风险；能力探测前移到 M0；待验证项统一成表 |
 | v3.1 | 明确语音对话需求（免唤醒、听得出语气、预置音色 + 情绪变化、支架外放短聊）。对话架构定为方案 B，C 备选，纯级联降为末位；新增收音两道闸门（4.4）；标签扩展为 `<user>` / `<emo>` / `<act>`，`<emo>` 同时驱动 TTS 情感参数；状态机加入用户语气与口型；会话记忆改为适配实时会话（服务端会话内持有、客户端注入与重建）；M2 拆为 M2a 厂商能力验证与 M2b 全链路；厂商选型条件与待验证项相应更新 |
 | v3.2 | 签名约束更新：2026-11-20 真机安装时免费账号 iPhone 注册名额打满（跨项目共享、无法在线删除），购入付费个人会员。签名 7 天改为约一年，`increased-memory-limit` 可用（V12 前提解决），Push 技术障碍消除（产品定位仍不主动推送） |
+| v3.3 | M0 能力探测实测回写：V1 国行设备 `deviceNotEligible`（FM 本机不可用，M4 只剩 MLX）；V2 zh_CN 支持+已安装；V3 可构造；NLEmbedding 简体句向量实测 nil → 离线意图匹配降级关键词 + CreateML；ARKit 人脸追踪支持 |

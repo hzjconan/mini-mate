@@ -42,17 +42,34 @@
 
 ## 实测结果
 
-> 在真机运行能力探测页后，把导出的报告粘贴到这里，并逐项写结论。
+探测设备：iPhone 16 Pro Max（iPhone17,2，型号 CH/A 国行）、iOS 27.2、2026-11-20。单项均 < 1 s，SC-002 达标。
+
+导出报告原文：
+
+```markdown
+- 设备：iPhone17,2
+- 系统：27.2
+- 时间：2026-11-20T08:12:40Z
+
+| 项 | 结果 | 原因 | 耗时 |
+| --- | --- | --- | --- |
+| V1 Foundation Models | 不可用 | 设备不支持 Apple Intelligence | 0.56 s |
+| V1 中文支持 | 不可用 | Foundation Models 不可用 | 0.56 s |
+| V2 SpeechTranscriber zh-CN | 可用 | 简体支持 zh_CN；中文支持：zh_TW, zh_HK, zh_CN；已安装：zh_TW, zh_CN | 0.64 s |
+| V3 SpeechDetector | 可用 | — | 0.00 s |
+| NLEmbedding 中文 | 不可用 | 无简体中文句向量 | 0.59 s |
+| ARKit 人脸追踪 | 可用 | — | 0.00 s |
+```
 
 | 项 | 结果 | 原因 / 备注 | 对后续的影响 |
 |---|---|---|---|
-| 设备 / 系统 | 待填 | | |
-| V1 Foundation Models | 待填 | | |
-| V1 中文支持 | 待填 | | |
-| V2 SpeechTranscriber zh-CN | 待填 | | |
-| V3 SpeechDetector | 待填 | | |
-| NLEmbedding 中文 | 待填 | | |
-| ARKit 人脸追踪 | 待填 | | |
+| 设备 / 系统 | iPhone17,2 / iOS 27.2 | iPhone 16 Pro Max，型号号码 CH/A（国行） | — |
+| V1 Foundation Models | ❌ 不可用 | `deviceNotEligible`——国行型号硬屏蔽 Apple Intelligence（A18 Pro 硬件本身支持，与语言/账号设置无关） | M4 若启动只能走 MLX；依赖 FM 的功能（如将来的看图）在本机不可用 |
+| V1 中文支持 | ❌ 不可用 | FM 整体不可用，中文支持无从谈起 | 同上 |
+| V2 SpeechTranscriber zh-CN | ✅ 可用 | zh_CN 支持且资源已安装（zh_TW/HK/CN 均支持，已装 zh_TW、zh_CN） | 端侧/并行转写可用简体（003 V7、004 离线转写前提成立） |
+| V3 SpeechDetector | ✅ 可用 | 可构造并加入 `SpeechAnalyzer` | 人声闸门可用；误开率/效果仍待 003 M2b 实测 |
+| NLEmbedding 中文 | ❌ 不可用 | `sentenceEmbedding(.simplifiedChinese)` 返回 nil | 离线意图匹配降级：关键词 + CreateML 分类器（004 的 I-2 embedding 层在本机不生效） |
+| ARKit 人脸追踪 | ✅ 可用 | `ARFaceTrackingConfiguration.isSupported = true` | 按预期，TrueDepth 可用 |
 | 重签耗时（SC-001） | ✅ ~30 s | ⌘R 原地重签（付费账号 Xcode Managed Profile），@AppStorage 计数器保留（5→5） | 达标（≤5 min）|
 
 > 注（2026-11-20 实测）：付费账号下"签名到期、App 打不开"的状态无法模拟——iOS 设置无描述文件管理入口（付费证书在信任链内，不像免费账号有信任条目）；Xcode 27 的 Window 菜单也已移除设备描述文件管理；吊销 Apple Development 证书后 App 仍可正常启动，说明 iOS 启动校验是本地的（内嵌 profile + 签名链），不做吊销检查。真正的到期→重签全链路只能等 11 个月后自然到期或换回免费账号时验证。

@@ -96,7 +96,7 @@
 
 ## Assumptions
 
-- 开发机为 Apple Silicon Mac，安装 Xcode 26；设备为 iPhone 16 Pro Max、iOS 26。
+- 开发机为 Apple Silicon Mac，安装 Xcode 26+；设备为 iPhone 16 Pro Max（国行）、iOS 26+（实测 27.2）。
 - 使用付费个人开发者账号（2026-11-20 购入；此前为免费 Apple ID，因设备注册名额满而升级）。
 - 本阶段不接任何云端服务，API Key 只做存储，不发起调用。
 - 探测页是开发用的诊断界面，后续保留在设置中，不追求视觉设计。
