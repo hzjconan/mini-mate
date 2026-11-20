@@ -63,10 +63,10 @@ description: "M0 工程基座与能力探测的任务列表"
 
 - [x] T013 [P] [US2] `Sources/MMDiagnostics/CapabilityModels.swift`：`CapabilityID`、`CapabilityStatus`、`CapabilityResult`、`CapabilityReport`（见 data-model.md）
 - [x] T014 [US2] `Sources/MMDiagnostics/DiagnosticsRunner.swift`：`withTaskGroup` 并发、单项 3 s 超时（依赖 T013）
-- [ ] T015 [P] [US2] `Sources/MMDiagnostics/Probes/FoundationModelsProbe.swift`：`SystemLanguageModel.default.availability` 各分支映射为中文原因；检查简体中文支持
-- [ ] T016 [P] [US2] `Sources/MMDiagnostics/Probes/SpeechProbes.swift`：`SpeechTranscriber` zh-CN（supported / installed）、`SpeechDetector` 可用性
-- [ ] T017 [P] [US2] `Sources/MMDiagnostics/Probes/NLEmbeddingProbe.swift`：中文句向量是否非 nil + 近义句距离冒烟测试
-- [ ] T018 [P] [US2] `Sources/MMDiagnostics/Probes/ARKitProbe.swift`：`ARFaceTrackingConfiguration.isSupported`（`#if os(iOS)`）
+- [x] T015 [P] [US2] `Sources/MMDiagnostics/Probes/FoundationModelsProbe.swift`：`SystemLanguageModel.default.availability` 各分支映射为中文原因；检查简体中文支持
+- [x] T016 [P] [US2] `Sources/MMDiagnostics/Probes/SpeechProbes.swift`：`SpeechTranscriber` zh-CN（supported / installed）、`SpeechDetector` 可用性
+- [x] T017 [P] [US2] `Sources/MMDiagnostics/Probes/NLEmbeddingProbe.swift`：中文句向量是否非 nil + 近义句距离冒烟测试
+- [x] T018 [P] [US2] `Sources/MMDiagnostics/Probes/ARKitProbe.swift`：`ARFaceTrackingConfiguration.isSupported`（`#if os(iOS)`）
 - [ ] T019 [US2] `App/MiniMate/Screens/DiagnosticsView.swift`：开始探测、逐项展示状态与原因、导出（`ShareLink` 分享 Markdown 文本）
 - [ ] T020 [US2] 真机运行探测，导出结果写入 `specs/001-m0-foundation/research.md` 并逐项写结论；若结论推翻 tech-selection 中的假设，同步修订 `docs/tech-selection.md`
 
