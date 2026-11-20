@@ -89,7 +89,7 @@ description: "M0 工程基座与能力探测的任务列表"
 - [x] T022 [US3] `Sources/MMSecurity/CredentialStore.swift`：协议 + `KeychainCredentialStore`（generic password，service `ai.minimate.credentials`，`AfterFirstUnlockThisDeviceOnly`）+ `InMemoryCredentialStore`（测试用）
 - [x] T023 [US3] `Sources/MMSecurity/VendorID.swift`：厂商枚举（`aliyun`、`volcengine`、`openai`）
 - [x] T024 [US3] `App/MiniMate/Screens/SettingsView.swift`：每个厂商一行，显示状态、输入（`SecureField`）、保存、删除；入口包含"能力探测"
-- [ ] T025 [US3] 真机验证 quickstart US3，并执行 `git grep` 确认无明文
+- [x] T025 [US3] 真机验证 quickstart US3，并执行 `git grep` 确认无明文
 
 **Checkpoint**：SC-005 达成
 
@@ -98,7 +98,7 @@ description: "M0 工程基座与能力探测的任务列表"
 ## Phase 6: Polish
 
 - [x] T026 [P] 更新 `AGENTS.md` 中的构建与测试命令（若实际命令与文档不同）
-- [ ] T027 按 quickstart 第五节完成全部验收勾选，并在 `research.md` 填完实测表
+- [x] T027 按 quickstart 第五节完成全部验收勾选，并在 `research.md` 填完实测表
 
 ---
 
