@@ -63,7 +63,7 @@
 - 账号的设备注册名额或 App ID 数量已达上限（2026-11-20 实测遇到：免费账号 iPhone 注册名额满 → 购入付费会员）。
 - Apple Intelligence 未开启、仍在下载模型、或因地区/语言不可用——探测须区分这几种原因。
 - `SpeechTranscriber` 支持 zh-CN，但对应语言资源尚未下载。
-- `NLEmbedding.sentenceEmbedding(for: .simplifiedChinese)` 返回 nil。
+- `NLEmbedding.sentenceEmbedding(for: .simplifiedChinese)` 返回 nil（实测：iOS 27.2 上同一进程内首次调用会返回 nil，重试即可，探测须区分这种情况与真不可用）。
 
 ## Requirements *(mandatory)*
 

@@ -15,6 +15,7 @@
 | `speechTranscriberChinese` | `SpeechTranscriber` 是否支持 zh-CN（含资源是否已安装） |
 | `speechDetector` | `SpeechDetector` 是否可用 |
 | `nlEmbeddingChinese` | `NLEmbedding` 简体中文句向量是否可用 |
+| `nlContextualEmbeddingChinese` | `NLContextualEmbedding` 简体中文模型能否加载 |
 | `arFaceTracking` | ARKit 人脸追踪是否支持 |
 
 ## CapabilityStatus

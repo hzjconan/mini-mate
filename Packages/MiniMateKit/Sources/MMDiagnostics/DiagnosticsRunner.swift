@@ -97,6 +97,7 @@ public enum DiagnosticsProbes {
             SpeechTranscriberProbe(),
             SpeechDetectorProbe(),
             NLEmbeddingProbe(),
+            NLContextualEmbeddingProbe(),
             ARKitProbe(),
         ]
     }

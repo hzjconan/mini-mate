@@ -7,6 +7,7 @@ public enum CapabilityID: String, CaseIterable, Sendable {
     case speechTranscriberChinese
     case speechDetector
     case nlEmbeddingChinese
+    case nlContextualEmbeddingChinese
     case arFaceTracking
 
     /// Row label in the exported report; mirrors `research.md` 的实测结果表.
@@ -17,6 +18,7 @@ public enum CapabilityID: String, CaseIterable, Sendable {
         case .speechTranscriberChinese: "V2 SpeechTranscriber zh-CN"
         case .speechDetector: "V3 SpeechDetector"
         case .nlEmbeddingChinese: "NLEmbedding 中文"
+        case .nlContextualEmbeddingChinese: "NLContextualEmbedding 中文"
         case .arFaceTracking: "ARKit 人脸追踪"
         }
     }

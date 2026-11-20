@@ -121,7 +121,7 @@ ConversationEvent ─▶ TurnRecorder ─▶ Turn（每轮结束落盘）
 **意图匹配（离线）**
 
 1. 关键词 / 正则层（`offline-intents.json` 中的 `patterns`）——命中即返回。
-2. `NLEmbedding` 层（若 001 结论为可用）：与每个意图的示例句计算余弦距离，最近且距离 < 阈值（初值 0.35，需调）即命中。
+2. `NLEmbedding` 层（001 复核结论：可用但区分度弱，只作辅助）：与每个意图的示例句计算余弦距离，最近且距离 < 阈值即命中。阈值须实测：001 中近义句距离为 0.37–0.49，原初值 0.35 一句都匹配不上；且有一组无关句比近义句更近，建议同时要求与次近意图拉开差距。加载须沿用 001 `NLEmbeddingProbe.loadSentenceEmbedding` 的做法（首次调用返回 nil 时重试，再按 revision 加载）。若改用 `NLContextualEmbedding`，须按 `NLContextualEmbeddingProbe` 的方式间隔约 300 ms 重试 `load()`，并放到启动后预热，避免第一句话时才加载。
 3. 都不命中 → `fallback` 意图。
 
 **垫场（`FillerPolicy`）**

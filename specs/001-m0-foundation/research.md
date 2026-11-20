@@ -37,14 +37,15 @@
 | V1 | Foundation Models 是否可用、是否支持中文 | `SystemLanguageModel.default.availability` + 中文 locale 检查 | 不可用 → M4 走 MLX；离线意图匹配只用 `NLEmbedding` |
 | V2 | `SpeechTranscriber` 是否支持 zh-CN | `supportedLocales` / `installedLocales` | 不可用 → 离线识别用 `SFSpeechRecognizer` |
 | V3 | `SpeechDetector` 能否用作人声闸门 | 能否构造；效果在 003 中实测 | 不可用 → 能量阈值 + 过零率 |
-| — | `NLEmbedding` 中文句向量 | 是否非 nil + 近义句距离 | 不可用 → 关键词 + CreateML 分类器 |
+| — | `NLEmbedding` 中文句向量 | 是否非 nil（含重试 / 按 revision 加载）+ 3 组近/远义句距离 | 不可用 → 关键词 + CreateML 分类器 |
+| — | `NLContextualEmbedding` 中文 | 能否 `load()` + 均值池化后同样 3 组距离 | 作为 `NLEmbedding` 的备选 |
 | — | ARKit 人脸追踪 | `ARFaceTrackingConfiguration.isSupported` | 参考设备预期为支持 |
 
 ## 实测结果
 
 探测设备：iPhone 16 Pro Max（iPhone17,2，型号 CH/A 国行）、iOS 27.2、2026-11-20。单项均 < 1 s，SC-002 达标。
 
-导出报告原文：
+导出报告原文（首次探测；NLEmbedding 一行已被后文"NLEmbedding 复核"推翻）：
 
 ```markdown
 - 设备：iPhone17,2
@@ -68,8 +69,33 @@
 | V1 中文支持 | ❌ 不可用 | FM 整体不可用，中文支持无从谈起 | 同上 |
 | V2 SpeechTranscriber zh-CN | ✅ 可用 | zh_CN 支持且资源已安装（zh_TW/HK/CN 均支持，已装 zh_TW、zh_CN） | 端侧/并行转写可用简体（003 V7、004 离线转写前提成立） |
 | V3 SpeechDetector | ✅ 可用 | 可构造并加入 `SpeechAnalyzer` | 人声闸门可用；误开率/效果仍待 003 M2b 实测 |
-| NLEmbedding 中文 | ❌ 不可用 | `sentenceEmbedding(.simplifiedChinese)` 返回 nil | 离线意图匹配降级：关键词 + CreateML 分类器（004 的 I-2 embedding 层在本机不生效） |
+| NLEmbedding 中文 | ✅ 可用（复核修正） | 首次探测记为 nil 是误判，见下文"NLEmbedding 复核"；640 维，近<远 2/3 | 离线意图匹配仍以关键词 + CreateML 为主；004 的 I-2 embedding 层可作辅助，阈值须重新实测 |
+| NLContextualEmbedding 中文 | ✅ 可用（需延迟重试） | 模型已在设备上，512 维；进程早期第 1 次 `load()` 报 `Failed to locate embedding model`，立即重试也失败，约 300 ms 后重试成功（2/2 次） | 与 NLEmbedding 同为辅助候选；第 1 组区分度更好，另两组同样偏弱 |
 | ARKit 人脸追踪 | ✅ 可用 | `ARFaceTrackingConfiguration.isSupported = true` | 按预期，TrueDepth 可用 |
 | 重签耗时（SC-001） | ✅ ~30 s | ⌘R 原地重签（付费账号 Xcode Managed Profile），@AppStorage 计数器保留（5→5） | 达标（≤5 min）|
+
+### NLEmbedding 复核（2026-11-20，同一台设备，系统语言 `zh-Hans-CN`）
+
+首次探测的"无简体中文句向量"是误判。用临时诊断构建在真机上跑了 3 次（代码已移除），之后又用修正后的探测器跑了 5 次：
+
+- **首次调用返回 nil**：`NLEmbedding.sentenceEmbedding(for: .simplifiedChinese)` 在同一进程内的第一次调用返回 nil，紧接着第二次调用就非 nil。先等 4 s 再调用，第一次照样是 nil，所以不是等待时间的问题。看起来是进程里第一次调用 sentence embedding 都会失败，与语言无关（某次运行先调中文失败、再调英文成功）。偶尔前两次都是 nil，这时直接调 `sentenceEmbedding(for:revision: currentSentenceEmbeddingRevision(for:))` 可以加载成功。`supportedSentenceEmbeddingRevisions(.simplifiedChinese) = [1]`；日语为空，确实不支持。
+- **没有公开的下载 API**：iOS 27 SDK 中 `NLEmbedding` 没有请求资源的接口（网上流传的 `requestEmbeddingAssets` 并不存在）。`NLTagger.requestAssets(for: .simplifiedChinese, tagScheme: .lemma)` 2 分钟以上不返回。
+- **`NLContextualEmbedding`**：资源已在设备上，加载 0.045 s，12 句共 0.097 s。在新进程里过早调用时，`hasAvailableAssets = false`，`load()` 报 `Failed to locate embedding model`，紧接着重试（间隔不到 10 ms）也失败（3/3 次）。改为间隔 300 ms 重试后，第 2 次就能成功，距第 1 次 362 ms / 395 ms（2/2 次），此时 `hasAvailableAssets = true`。推测系统要在第一次查询后花几百毫秒建立资源索引。探测器最多试 4 次、间隔 300 ms。`hasAvailableAssets` 在进程早期不可信，应以 `load()` 的结果为准；不要据此调用 `requestAssets()` 去重复下载。
+- **区分度**（余弦距离，越小越近；探测器详情里的"近<远"即这 3 组）：
+
+| 锚句 → 近义 / 无关 | NLEmbedding 句向量 | NLContextualEmbedding（均值池化） |
+|---|---|---|
+| 今天天气很好 → 今天天气不错 / 我昨天睡得很晚 | 0.372 / 0.443 ✅ | 0.091 / 0.239 ✅ |
+| 我想听首歌 → 放点音乐吧 / 帮我关灯 | 0.486 / 0.605 ✅ | 0.371 / 0.385 勉强 |
+| 我有点难过 → 心情不太好 / 明天要开会 | 0.469 / 0.401 ❌ | 0.365 / 0.350 ❌ |
+
+结论：句向量可用，但只有 3 组冒烟测试，且其中 1 组排序颠倒，近义句距离也都在 0.37 以上 → 不能单独用于意图匹配。004 的 embedding 层只作辅助，阈值须用真实意图样本另测（004 plan 中的初值 0.35 在这组数据下一句都匹配不上）。凡在 App 中调用 `NLEmbedding.sentenceEmbedding`，都要按 `NLEmbeddingProbe.loadSentenceEmbedding` 的方式处理首次调用返回 nil 的情况。
+
+复核后探测器导出（2026-11-20T09:44:34Z，节选；另一次运行中 NLEmbedding 前两次都返回 nil，按 revision 1 加载成功）：
+
+```markdown
+| NLEmbedding 中文 | 可用 | 首次调用返回 nil，重试成功；近<远 2/3：0.372<0.443，0.486<0.605，0.469>0.401 | 0.08 s |
+| NLContextualEmbedding 中文 | 可用 | 第 1 次 hasAvailableAssets=false，load 失败：Failed to locate embedding model；第 2 次加载成功（hasAvailableAssets=true，距首次 395 ms）；维度 512；近<远 2/3：0.091<0.239，0.371<0.385，0.365>0.350 | 0.57 s |
+```
 
 > 注（2026-11-20 实测）：付费账号下"签名到期、App 打不开"的状态无法模拟——iOS 设置无描述文件管理入口（付费证书在信任链内，不像免费账号有信任条目）；Xcode 27 的 Window 菜单也已移除设备描述文件管理；吊销 Apple Development 证书后 App 仍可正常启动，说明 iOS 启动校验是本地的（内嵌 profile + 签名链），不做吊销检查。真正的到期→重签全链路只能等 11 个月后自然到期或换回免费账号时验证。

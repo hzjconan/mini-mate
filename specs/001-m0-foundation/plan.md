@@ -102,7 +102,7 @@ docs/tech-selection.md
 - **能力探测**：`CapabilityProbe` 协议，每项一个实现；`DiagnosticsRunner` 并发执行（`withTaskGroup`），单项超时 3 s，异常转为 `.error(reason)`。
 - **Foundation Models 探测**：读取 `SystemLanguageModel.default.availability`，把 `.unavailable(reason)` 的各分支映射为中文原因；可用时再用 `supportsLocale` 检查中文（API 名称以 Xcode 26 SDK 为准）。
 - **Speech 探测**：`SpeechTranscriber.supportedLocales` / `installedLocales` 是否含 zh-CN；`SpeechDetector` 能否构造并加入 `SpeechAnalyzer`。
-- **NLEmbedding 探测**：`NLEmbedding.sentenceEmbedding(for: .simplifiedChinese)` 是否非 nil，并对两句近义句计算距离作冒烟测试。
+- **NLEmbedding 探测**：`NLEmbedding.sentenceEmbedding(for: .simplifiedChinese)` 是否非 nil（首次返回 nil 时重试，再按 revision 加载，见 research.md 复核），并用 3 组锚句 / 近义 / 无关句做距离冒烟测试（`EmbeddingSmokeTest`，只报告排序正确的组数，不判定质量）。`NLContextualEmbedding` 中文同样探测（能否 `load()` + 均值池化后同一组冒烟测试）。
 - **ARKit 探测**：`ARFaceTrackingConfiguration.isSupported`。
 - **CredentialStore**：`kSecClassGenericPassword`，service 固定为 `ai.minimate.credentials`，account 为厂商标识；`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`。
 

@@ -99,6 +99,7 @@ description: "M0 工程基座与能力探测的任务列表"
 
 - [x] T026 [P] 更新 `AGENTS.md` 中的构建与测试命令（若实际命令与文档不同）
 - [x] T027 按 quickstart 第五节完成全部验收勾选，并在 `research.md` 填完实测表
+- [x] T028 复核 NLEmbedding：`Tests/MMDiagnosticsTests/EmbeddingSmokeTestTests.swift` 先行；`Probes/EmbeddingSmokeTest.swift`（3 组近/远义句）；`NLEmbeddingProbe` 加首次 nil 重试与按 revision 加载；新增 `NLContextualEmbeddingProbe`；真机重测并修订 `research.md`、`docs/tech-selection.md`（v3.4）、004 plan / research
 
 ---
 
