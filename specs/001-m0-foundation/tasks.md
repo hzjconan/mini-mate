@@ -26,7 +26,7 @@ description: "M0 工程基座与能力探测的任务列表"
 
 ## Phase 2: Foundational
 
-- [ ] T005 [P] 在 `Packages/MiniMateKit/Sources/MMCore/MMCore.swift` 建立模块占位与 `Clock` 协议（便于后续测试注入时间）
+- [x] T005 [P] 在 `Packages/MiniMateKit/Sources/MMCore/MMCore.swift` 建立模块占位与 `Clock` 协议（便于后续测试注入时间）
 - [ ] T006 `App/MiniMate/AppComposition.swift`：组合根，持有各模块实现；`App/MiniMate/MiniMateApp.swift` 注入
 - [ ] T007 `App/MiniMate/Screens/HomeView.swift`：首页占位 + 进入设置的入口
 
