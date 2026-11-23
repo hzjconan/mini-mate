@@ -1,0 +1,8 @@
+# Generated build artifacts — keep PLAN/README/config/scripts/reports
+work/
+textures/
+renders/
+out/
+*.blend1
+__pycache__/
+.DS_Store
