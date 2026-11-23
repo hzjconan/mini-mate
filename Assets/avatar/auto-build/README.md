@@ -22,7 +22,7 @@ open renders/phase1/review.html
 
 硬门禁已通过：52 个 ARKit 名称、8 条动作、38,392 三角面、贴图 ≤ 2048²、USDZ pxr 校验通过。
 
-已知差距：头部抬高 4 cm 使头身比轻微变化；V 领仍有白色领口滚边/collar 叠层；猫耳侧后仍部分被头发遮挡；连帽衫没有布料褶皱/法线细节；手指偏细长；动作幅度未重调；USDZ PBR 与 Blender 不同。复审后可进入 Phase 3 接入 App；详见 `reports/phase1-review.md`。
+已知差距：头部抬高 4 cm 使头身比轻微变化；V 领仍有白色领口滚边/collar 叠层；猫耳侧后仍部分被头发遮挡；连帽衫没有布料褶皱/法线细节；手指偏细长；动作幅度未重调；USDZ PBR 与 Blender 不同。素材侧已定稿，可进入 Phase 3 接入 App（需单独批准）；详见 `reports/phase1-review.md`。
 
 ## Phase 0 状态（2026-11-21）
 

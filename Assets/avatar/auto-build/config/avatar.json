@@ -2,8 +2,7 @@
   "source": {
     "vrm": "../VRoid_V110_Female_v1.1.3.vrm",
     "threeView": "../reference/three-view.jpg",
-    "expressionSheet": "../reference/expression-sheet.jpg",
-    "recipe": "../vroid-recipe.md"
+    "expressionSheet": "../reference/expression-sheet.jpg"
   },
   "palette": {
     "skinBase": "#F7DCD3",

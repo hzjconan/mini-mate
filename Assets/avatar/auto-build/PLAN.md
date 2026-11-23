@@ -1,9 +1,9 @@
 # 小瓜形象自动化重建 — 任务计划书
 
-**状态**：Phase 0 已通过（2.54）；Phase 1 已通过；Phase 1.2 复审（脖子/猫耳）2.87 已确认；眼睛/嘴巴/服色修订（瞳孔再内收 2 px、无唇线/唇阴影，单一深色内口腔 + idle 小张口（无贯穿横线/悬空上唇线/突兀阴影；sad/concerned 不笑、surprised 小 o、happy 张口、playful 张嘴；吐舌待单独舌头层）、连帽衫按原稿取色）待复审；之后可进入 Phase 3 接入 App（Phase 2 可选）
+**状态**：Phase 0 已通过（2.54）；Phase 1 已通过；Phase 1.2 复审（脖子/猫耳）2.87 已确认；眼睛/嘴巴/服色修订（瞳孔再内收 2 px、无唇线/唇阴影，单一深色内口腔 + idle 小张口（无贯穿横线/悬空上唇线/突兀阴影；sad/concerned 不笑、surprised 小 o、happy 张口、playful 张嘴；吐舌待单独舌头层）、连帽衫按原稿取色）已定稿（2026-11-23 你确认“可以了”）；素材侧完成，可进入 Phase 3 接入 App（需单独批准；Phase 2 可选）
 **日期**：2026-11-21
 **工作目录**：`Assets/avatar/auto-build/`
-**输入**：`Assets/avatar/VRoid_V110_Female_v1.1.3.vrm`、`Assets/avatar/reference/`、`Assets/avatar/vroid-recipe.md`
+**输入**：`Assets/avatar/VRoid_V110_Female_v1.1.3.vrm`、`Assets/avatar/reference/`、`Assets/avatar/auto-build/config/avatar.json`
 **最终产物**：候选 `minimate.vrm` / `minimate.usdz`、贴图、对比渲染、验证报告
 **边界**：本计划只改形象素材，不改 App / Swift Package / 既有 spec；最终替换 `App/MiniMate/Resources/Avatar/minimate.usdz` 必须单独批准。
 
@@ -14,7 +14,7 @@
 ### 1.1 现状
 
 - 2D 设计原图已确认：`Assets/avatar/reference/three-view.jpg`（正/侧/背三视图）与 `expression-sheet.jpg`（6 组表情）。
-- `Assets/avatar/vroid-recipe.md` 已经把设计拆成色值、比例、发型、服装和表情参数，但仍是“给人看的配方”，需要手工在 VRoid 里操作。
+- 色值、比例、发型与服装参数已集中在 `Assets/avatar/auto-build/config/avatar.json`，由脚本直接消费，不需要再手工在 VRoid 里操作。
 - 当前 `Assets/avatar/VRoid_V110_Female_v1.1.3.vrm` 是临时占位形象：标准头身比、灰发、白 T 恤、黑短裤，与设计差异大。
 - 当前 `App/MiniMate/Resources/Avatar/minimate.usdz` 已验证：**124 个 blendShape 目标（Basis 不计）、52 个 ARKit 名称齐全、8 条 SkelAnimation 齐全**。导出管线本身不会丢形态键。
 - 底座模型实测：`Face` 网格 125 个形态键（含 Basis）、118 根骨骼；脸/身体/头发/衣服分开；贴图是 VRoid 标准图集（`_01`–`_17`），UV 布局固定。
@@ -29,7 +29,7 @@ VRoid Studio 没有公开 API / CLI。现有自动化方案都不适合当前 ma
 | `vroid-studio-mcp`（BepInEx 注入内部 API） | 排除 | Windows 正式支持、Linux 走 Wine，macOS 未发布；只能改预设/滑杆/颜色，不做贴图、发型分组、Perfect Sync；只保存 `.vroid` |
 | `mcp-vroid`（截图 + OCR + 点击） | 排除 | 仅 Linux/Wayland；对 macOS 原生 VRoid 不可用 |
 | AI 一键出 VRM（Charakuru / Meshy 等） | 只适合原型 | 默认没有 52 个 ARKit 形态键，脸部/拓扑/绑定不适配现有 App 契约；换模型等于重做表情系统 |
-| Blender 无头脚本改现有模型 | **采用** | 保留 52 形态键；标准 UV 可脚本重绘；现有 `export_avatar.py` 已能导出 USDZ |
+| Blender 无头脚本改现有模型 | **采用** | 保留 52 形态键；标准 UV 可脚本重绘；`auto-build/scripts/` 已能导出 USDZ |
 
 ### 1.3 为什么必须保留现有 `Face` 网格
 
@@ -40,7 +40,7 @@ VRoid Studio 没有公开 API / CLI。现有自动化方案都不适合当前 ma
 - VRoid 标准贴图集，UV 固定，适合程序化重绘。
 - 头发、身体、衣服是独立网格；新增猫耳发箍、呆毛、连帽衫不会碰到 `Face`。
 - Blender 5.3 已安装，VRM 插件已可用；`pxr` 随 Blender 提供，能直接检查 USDZ。
-- 现有 `Assets/avatar/export_avatar.py` 已打通 VRM → USDZ，并保留形态键与 8 条动作。
+- `auto-build/scripts/` 已打通 VRM → USDZ，并保留形态键与 8 条动作。
 
 ---
 
@@ -110,7 +110,7 @@ VRoid Studio 没有公开 API / CLI。现有自动化方案都不适合当前 ma
 ### 4.1 数据流
 
 ```text
-设计三视图 + 表情表 + vroid-recipe.md
+设计三视图 + 表情表 + config/avatar.json
                 │
                 ▼
         config/avatar.json（色值、比例、开关）
@@ -169,8 +169,7 @@ Assets/avatar/auto-build/
   "source": {
     "vrm": "../VRoid_V110_Female_v1.1.3.vrm",
     "threeView": "../reference/three-view.jpg",
-    "expressionSheet": "../reference/expression-sheet.jpg",
-    "recipe": "../vroid-recipe.md"
+    "expressionSheet": "../reference/expression-sheet.jpg"
   },
   "palette": {
     "skinBase": "#F7DCD3",
@@ -215,7 +214,7 @@ Assets/avatar/auto-build/
 | Blender 自带 Python + numpy | 生成贴图、批量改网格/权重 | 否 |
 | Blender 自带 pxr | 检查 USDZ 结构 | 否 |
 | macOS `usdzip` | 打包 USDZ | 否 |
-| 现有 `Assets/avatar/export_avatar.py` | 导出参考；必要时在工作目录内复制一份并加校验 | 否 |
+| `auto-build/scripts/export_phase1.py` | 导出 USDZ 并加校验 | 否 |
 
 不新增 Pillow、OpenCV 等依赖；贴图用 numpy 在 Blender Python 内生成。
 
@@ -238,7 +237,7 @@ Assets/avatar/auto-build/
   - 脸/五官：`_01` 嘴、`_02` 虹膜、`_03` 高光、`_04` 脸、`_07` 眉、`_08` 睫毛、`_09` 眼线；
   - 头发：`_12` 后发、`_16`/`_17` 头发；
   - 服装：`_13` 短裤、`_14` 上衣、`_15` 鞋。
-- 设计图只用于配色/轮廓参考；色值以 `vroid-recipe.md` 为准，避免从截图取色受光照影响。
+- 设计图只用于配色/轮廓参考；色值以 `config/avatar.json` 为准，避免从截图取色受光照影响。
 - 贴图生成后先在 Blender 中直接预览，不依赖 VRoid 的材质系统。
 
 ### 4.7 几何策略
@@ -255,7 +254,7 @@ Assets/avatar/auto-build/
 
 ### 4.8 动作策略
 
-- 继续使用 `export_avatar.py` 的 8 个程序化动作。
+- 继续使用 `auto-build/scripts/` 生成的 8 个程序化动作。
 - 比例缩短后重新检查 `wave`、`heart`、`shyCover` 的手部到达位置与穿模；必要时在 `build_avatar.py` 中调整关键帧，但动作名称不变。
 - 不新增动作；M2 的口型层不在此计划内。
 
@@ -297,7 +296,7 @@ Assets/avatar/auto-build/
 | T1.5 | 导出 + 验证 + 全套审核材料（三视图、表情、动作、转台、`review.html`） | `out/minimate_phase1.usdz`、`renders/phase1/` | 硬门禁全通过 |
 | T1.6 | 人工评审 | 评审记录 | 你确认或提出修改 |
 
-**Phase 1 当前进度（2026-11-22）**：首轮评审 2.43；已按反馈修正猫耳、袜子长度、手脚肤色和连帽衫蓬松度（Phase 1.1）。T1.1、T1.2、T1.5 完成，硬门禁 G-1–G-6 全通过；T1.4 已检查（未重调幅度）；T1.3 发束细化暂缓（Phase 0 发型评分 3/3）。T1.6 已通过（Phase 1.1 平均 2.64，无备注）。Phase 1.2 复审：猫耳加宽曲边；头部抬高 4 cm、Body 颈部皮肤跟随（无独立圆柱）、T 恤前片 V 领真正剪开（Body 胸口皮肤）；硬门禁仍通过（38,392 三角面）。眼睛修订：虹膜/高光壳外移 5 mm（125 个形态键同步），瞳孔/高光画到可见虹膜中心，高光改为设计稿同光向；52/8/USDZ 校验通过。嘴巴修订：`_04` 不画唇线/唇阴影，FaceMouth 用单一深色内口腔，`jawOpen 0.15` 烘进 Basis 让小张口，face/head closeup 无横线；瞳孔贴图再内收 2 px；连帽衫按原稿取样（上 #E7ECF7、下 #DEE8F5）；呆毛改为更短、更大卷曲的圆环状；52/8/USDZ 校验通过（38,392 三角面），待复审。详见 `reports/phase1-review.md`。
+**Phase 1 当前进度（2026-11-22）**：首轮评审 2.43；已按反馈修正猫耳、袜子长度、手脚肤色和连帽衫蓬松度（Phase 1.1）。T1.1、T1.2、T1.5 完成，硬门禁 G-1–G-6 全通过；T1.4 已检查（未重调幅度）；T1.3 发束细化暂缓（Phase 0 发型评分 3/3）。T1.6 已通过（Phase 1.1 平均 2.64，无备注）。Phase 1.2 复审：猫耳加宽曲边；头部抬高 4 cm、Body 颈部皮肤跟随（无独立圆柱）、T 恤前片 V 领真正剪开（Body 胸口皮肤）；硬门禁仍通过（38,392 三角面）。眼睛修订：虹膜/高光壳外移 5 mm（125 个形态键同步），瞳孔/高光画到可见虹膜中心，高光改为设计稿同光向；52/8/USDZ 校验通过。嘴巴修订：`_04` 不画唇线/唇阴影，FaceMouth 用单一深色内口腔，`jawOpen 0.15` 烘进 Basis 让小张口，face/head closeup 无横线；瞳孔贴图再内收 2 px；连帽衫按原稿取样（上 #E7ECF7、下 #DEE8F5）；呆毛改为更短、更大卷曲的圆环状；52/8/USDZ 校验通过（38,392 三角面），已定稿（2026-11-23 你确认“可以了”）。详见 `reports/phase1-review.md`。
 
 ### Phase 2 — 条件性脸型与最终材质（需单独批准）
 
@@ -498,8 +497,6 @@ Assets/avatar/auto-build/
 - `specs/002-m1-presence/contracts/avatar-renderer.md`
 - `specs/002-m1-presence/research.md`（D3、V10）
 - `Assets/avatar/README.md`
-- `Assets/avatar/vroid-recipe.md`
-- `Assets/avatar/export_avatar.py`
 
 ## 变更记录
 
