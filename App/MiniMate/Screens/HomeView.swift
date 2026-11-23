@@ -18,6 +18,10 @@ struct HomeView: View {
                 Text("重签后此数值应保留")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                NavigationLink("形象（占位）") {
+                    AvatarScreen()
+                }
+                .buttonStyle(.borderedProminent)
             }
             .navigationTitle("MiniMate")
             .toolbar {

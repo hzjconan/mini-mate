@@ -17,15 +17,11 @@
 - **Rationale**：RealityKit 原生能力（iOS 18+），无需自写蒙皮。
 - **需确认**：API 细节（`BlendShapeWeightsMapping`、对多网格的支持）以 Xcode 26 SDK 为准；若不可行，退路是 SceneKit `SCNMorpher`（已进入弃用流程，仅作临时方案）。
 
-### D3. 素材管线：VRoid Perfect Sync → Blender → USDZ
+### D3. 素材管线：VRoid Perfect Sync → Blender → USDZ（由 auto-build 自动执行）
 
-- **Decision**：
-  1. 选一个带 Perfect Sync（52 个 ARKit blendShape）的 VRoid 模型，确认许可允许个人使用与修改；
-  2. Blender 中用 VRM 导入插件导入；
-  3. 检查形态键名称与 ARKit 名称一致，缺失或命名不同的在 Blender 中重命名；
-  4. 制作或导入动作片段（点头、挥手、转圈、比心、害羞、后仰、四处看、注意到你），命名与 `ActionTag` 一致；
-  5. 用 Blender USD 导出（勾选形态键与动画）得到 USDZ，必要时用 Reality Converter 检查。
-- **Rationale**：起步成本最低的 52 系数模型来源。
+- **Decision**：以 `Assets/avatar/VRoid_V110_Female_v1.1.3.vrm`（带 Perfect Sync 的 VRoid 模型）为底座，构建全部由 `Assets/avatar/auto-build/` 下的 Blender 无头脚本完成（贴图重绘、比例、猫耳/呆毛、连帽衫、8 个动作、USDZ 导出与硬门禁校验）。构建方式与参数见该目录的 `PLAN.md`、`README.md` 与 `config/avatar.json`。
+- **Rationale**：起步成本最低的 52 系数模型来源；脚本可重复运行，避免手工步骤丢失形态键。
+- **约束**：`Face` 拓扑不可修改（52 个 ARKit 名称挂在该网格）；产物替换 `App/MiniMate/Resources/Avatar/minimate.usdz` 需单独批准。
 - **Alternatives considered**：自建简化风格化模型（备选，约多 1–2 周）；Live2D（2D 路线备选）。
 - **需确认（V10）**：导出后形态键、骨骼权重、MToon 材质的保留情况。MToon 卡通着色在 USDZ 中会退化为 PBR，可能需要在 RealityKit 中用 `ShaderGraphMaterial` 近似卡通效果。
 

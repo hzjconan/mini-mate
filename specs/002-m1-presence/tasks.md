@@ -16,21 +16,21 @@ description: "M1 感知与形象的任务列表"
 
 ## Phase 1: Setup
 
-- [ ] T001 在 `Kit/Package.swift` 中新增 targets：`MMPerception`、`MMEmotion`、`MMAvatar` 及测试 targets `MMPerceptionTests`、`MMEmotionTests`；`MMEmotion` 声明资源 `Resources/expression-presets.json`
-- [ ] T002 [P] 新建 `Assets/avatar/README.md`：记录素材来源、许可、导出步骤（research.md D3）
-- [ ] T003 [P] 在 `App/MiniMate/Info.plist` 中添加 `NSCameraUsageDescription`
+- [x] T001 在 `Kit/Package.swift` 中新增 targets：`MMPerception`、`MMEmotion`、`MMAvatar` 及测试 targets `MMPerceptionTests`、`MMEmotionTests`；`MMEmotion` 声明资源 `Resources/expression-presets.json`
+- [x] T002 [P] 新建 `Assets/avatar/README.md`：记录素材来源、许可、导出步骤（research.md D3）
+- [x] T003 [P] 在 `App/MiniMate/Info.plist` 中添加 `NSCameraUsageDescription`
 
 ---
 
 ## Phase 2: Foundational（共享类型）
 
-- [ ] T004 [P] `Kit/Sources/MMCore/EmotionTag.swift`、`ActionTag.swift`、`UserEmotion.swift`（data-model.md）
-- [ ] T005 [P] `Kit/Sources/MMCore/ConversationEvent.swift`
-- [ ] T006 [P] `Kit/Tests/MMCoreTests/LatencyRecorderTests.swift`：p50/p90 计算、空样本、导出 CSV（先写）
-- [ ] T007 `Kit/Sources/MMCore/Metrics/LatencyRecorder.swift`：按指标名记录样本，计算 p50/p90，导出 CSV
-- [ ] T008 [P] `Kit/Sources/MMPerception/PerceptionFeatures.swift`、`FaceSignals`、`GestureEvent`
-- [ ] T009 [P] `Kit/Sources/MMEmotion/AvatarState.swift`、`AvatarPose.swift`、`ExpressionPreset.swift`、`ReactionRules.swift`
-- [ ] T010 [P] 协议：`Kit/Sources/MMPerception/PerceptionSource.swift`、`Kit/Sources/MMEmotion/EmotionStateMachine.swift`、`Kit/Sources/MMAvatar/AvatarRenderer.swift`（contracts/）
+- [x] T004 [P] `Kit/Sources/MMCore/EmotionTag.swift`、`ActionTag.swift`、`UserEmotion.swift`（data-model.md）
+- [x] T005 [P] `Kit/Sources/MMCore/ConversationEvent.swift`
+- [x] T006 [P] `Kit/Tests/MMCoreTests/LatencyRecorderTests.swift`：p50/p90 计算、空样本、导出 CSV（先写）
+- [x] T007 `Kit/Sources/MMCore/Metrics/LatencyRecorder.swift`：按指标名记录样本，计算 p50/p90，导出 CSV
+- [x] T008 [P] `Kit/Sources/MMPerception/PerceptionFeatures.swift`、`FaceSignals`、`GestureEvent`
+- [x] T009 [P] `Kit/Sources/MMEmotion/AvatarState.swift`、`AvatarPose.swift`、`ExpressionPreset.swift`、`ReactionRules.swift`
+- [x] T010 [P] 协议：`Kit/Sources/MMPerception/PerceptionSource.swift`、`Kit/Sources/MMEmotion/EmotionStateMachine.swift`、`Kit/Sources/MMAvatar/AvatarRenderer.swift`（contracts/）
 
 **Checkpoint**：`swift build` 通过
 
@@ -42,14 +42,14 @@ description: "M1 感知与形象的任务列表"
 
 **Independent Test**：quickstart 第一节。
 
-- [ ] T011 [US1] 选定 VRoid Perfect Sync 模型并确认许可；在 Blender 中导入、核对 52 个形态键命名、补齐缺失项（research.md D3）
-- [ ] T012 [US1] 制作或导入 8 个动作片段，命名与 `ActionTag` 一致；导出 `App/MiniMate/Resources/Avatar/minimate.usdz`
-- [ ] T013 [US1] `Kit/Sources/MMAvatar/BlendShapeIndex.swift`：加载后建立 ARKit 名称 → 索引映射，报告缺失项
+- [x] T011 [US1] 选定 VRoid Perfect Sync 模型并确认许可；在 Blender 中导入、核对 52 个形态键命名、补齐缺失项（research.md D3）（用 hinzka/52blendshapes-for-VRoid-face 临时模型，52 个名称零缺失）
+- [x] T012 [US1] 制作或导入 8 个动作片段，命名与 `ActionTag` 一致；导出 `App/MiniMate/Resources/Avatar/minimate.usdz`（当前为程序化占位动作，14 MB，含 8 条 SkelAnimation；后续由 `Assets/avatar/auto-build/` 重新生成）
+- [x] T013 [US1] `Kit/Sources/MMAvatar/BlendShapeIndex.swift`：加载后建立 ARKit 名称 → 索引映射，报告缺失项
 - [ ] T014 [US1] `Kit/Sources/MMAvatar/RealityKitAvatarRenderer.swift`：加载 USDZ、`BlendShapeWeightsComponent` 写入权重、动作播放与过渡（contracts/avatar-renderer.md R-1–R-5）
-- [ ] T015 [P] [US1] `Kit/Tests/MMEmotionTests/IdleMotionLayerTests.swift`：眨眼间隔分布（2–6 s）、呼吸周期、权重范围（先写）
-- [ ] T016 [US1] `Kit/Sources/MMAvatar/IdleMotionLayer.swift`：呼吸与眨眼（可注入时钟与随机源）
-- [ ] T017 [US1] `App/MiniMate/Screens/AvatarScreen.swift`：`RealityView` + 固定虚拟相机 + 每帧驱动
-- [ ] T018 [US1] `App/MiniMate/Screens/Debug/AvatarDebugPanel.swift`：52 个滑杆、动作点播
+- [x] T015 [P] [US1] `Kit/Tests/MMEmotionTests/IdleMotionLayerTests.swift`：眨眼间隔分布（2–6 s）、呼吸周期、权重范围（先写）
+- [x] T016 [US1] `Kit/Sources/MMAvatar/IdleMotionLayer.swift`：呼吸与眨眼（可注入时钟与随机源）
+- [x] T017 [US1] `App/MiniMate/Screens/AvatarScreen.swift`：`RealityView` + 固定虚拟相机 + 每帧驱动（当前为占位形象）
+- [x] T018 [US1] `App/MiniMate/Screens/Debug/AvatarDebugPanel.swift`：52 个滑杆、动作点播（当前为占位形象）
 - [ ] T019 [US1] 真机执行 quickstart 第一节，结果写入 `research.md`；若 V10 失败，停止后续任务并评估自建模型或 Live2D，修订 plan
 
 **Checkpoint**：SC-001 达成

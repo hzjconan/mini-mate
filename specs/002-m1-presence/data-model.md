@@ -109,6 +109,21 @@
 
 预设以 JSON 资源保存在 `Packages/MiniMateKit/Sources/MMEmotion/Resources/expression-presets.json`，便于调参。
 
+调参初值（来自 2D 表情稿，T034 在调试面板里调整后以实际导出为准）：
+
+| `emotion` | `weights` 初值 |
+|---|---|
+| `happy` | `mouthSmile` 0.8、`jawOpen` 0.2、`cheekSquint` 0.4、`browInnerUp` 0.3 |
+| `gentle` | `mouthSmile` 0.5、`eyeSquint` 0.2 |
+| `sad` | `mouthFrown` 0.6、`browInnerUp` 0.7、`eyeSquint` 0.3 |
+| `surprised` | `jawOpen` 0.5、`eyeWide` 0.6、`browOuterUp` 0.5 |
+| `shy` | `mouthSmile` 0.4、`eyeSquint` 0.5（低头由 `AvatarPose` 承担，不写权重） |
+| `playful` | `mouthSmile` 0.6、`eyeSquint` 0.3、`tongueOut` 0.5（模型暂无舌头层，实际只表现为张嘴） |
+| `concerned` | `mouthFrown` 0.3、`browDown` 0.4、`browInnerUp` 0.4 |
+| `neutral` | 空（全部为 0） |
+
+表中的对称键（如 `mouthSmile`）在 JSON 中需写成 ARKit 的左右两项（`mouthSmileLeft` / `mouthSmileRight`）。ARKit 52 个名称里没有“脸红”，腮红不通过权重实现。
+
 ### ReactionRules（可调参数）
 
 | 参数 | 初值 |

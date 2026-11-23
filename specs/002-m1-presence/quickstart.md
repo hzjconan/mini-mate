@@ -5,7 +5,7 @@
 ## 前置条件
 
 - 001 已完成，App 可在真机运行
-- 形象素材已按 research.md D3 导出为 `App/MiniMate/Resources/Avatar/minimate.usdz`
+- 形象素材由 `Assets/avatar/auto-build/` 自动构建并导出为 `App/MiniMate/Resources/Avatar/minimate.usdz`
 - 手机竖放在支架上，距离脸 30–80 cm，室内正常照明
 
 ## 一、素材验证（V10 / SC-001）

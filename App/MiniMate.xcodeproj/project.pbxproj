@@ -10,6 +10,7 @@
 		0A0A0A0A0A0A0A0A0A0A0001 /* MMCore in Frameworks */ = {isa = PBXBuildFile; productRef = 505050505050505050500001 /* MMCore */; };
 		0A0A0A0A0A0A0A0A0A0A0002 /* MMDiagnostics in Frameworks */ = {isa = PBXBuildFile; productRef = 505050505050505050500002 /* MMDiagnostics */; };
 		0A0A0A0A0A0A0A0A0A0A0003 /* MMSecurity in Frameworks */ = {isa = PBXBuildFile; productRef = 505050505050505050500003 /* MMSecurity */; };
+		0A0A0A0A0A0A0A0A0A0A0004 /* MMAvatar in Frameworks */ = {isa = PBXBuildFile; productRef = 505050505050505050500004 /* MMAvatar */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -32,6 +33,7 @@
 				0A0A0A0A0A0A0A0A0A0A0001 /* MMCore in Frameworks */,
 				0A0A0A0A0A0A0A0A0A0A0002 /* MMDiagnostics in Frameworks */,
 				0A0A0A0A0A0A0A0A0A0A0003 /* MMSecurity in Frameworks */,
+				0A0A0A0A0A0A0A0A0A0A0004 /* MMAvatar in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -77,6 +79,7 @@
 				505050505050505050500001 /* MMCore */,
 				505050505050505050500002 /* MMDiagnostics */,
 				505050505050505050500003 /* MMSecurity */,
+				505050505050505050500004 /* MMAvatar */,
 			);
 			productName = MiniMate;
 			productReference = 0D0D0D0D0D0D0D0D0D0D0001 /* MiniMate.app */;
@@ -271,6 +274,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = AAEKEX5Y3V;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于追踪面部表情与手势，让形象看向你并回应你。画面不会保存或上传。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
@@ -300,6 +304,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = AAEKEX5Y3V;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于追踪面部表情与手势，让形象看向你并回应你。画面不会保存或上传。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
@@ -364,6 +369,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 404040404040404040400001 /* XCLocalSwiftPackageReference "../Packages/MiniMateKit" */;
 			productName = MMSecurity;
+		};
+		505050505050505050500004 /* MMAvatar */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 404040404040404040400001 /* XCLocalSwiftPackageReference "../Packages/MiniMateKit" */;
+			productName = MMAvatar;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
