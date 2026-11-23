@@ -1,0 +1,56 @@
+{
+  "source": {
+    "vrm": "../VRoid_V110_Female_v1.1.3.vrm",
+    "threeView": "../reference/three-view.jpg",
+    "expressionSheet": "../reference/expression-sheet.jpg",
+    "recipe": "../vroid-recipe.md"
+  },
+  "palette": {
+    "skinBase": "#F7DCD3",
+    "skinShadow": "#E8BFB4",
+    "blush": "#F3B3AD",
+    "hairRoot": "#E3E2E4",
+    "hairMid": "#D5DCE8",
+    "hairTip": "#9CB6CE",
+    "hairShadow": "#CFC9C4",
+    "irisTop": "#96642F",
+    "irisCenter": "#D3A05C",
+    "irisBottom": "#F2D49A",
+    "irisOutline": "#6E4526",
+    "eyeWhite": "#FFFCFA",
+    "hoodieTop": "#E7ECF7",
+    "hoodieBottom": "#DEE8F5",
+    "shorts": "#C7D1E9",
+    "sock": "#FCFDFF",
+    "shoeBase": "#FEFEFE",
+    "shoeAccent": "#AFC6E6",
+    "earInnerStart": "#C9B3DE",
+    "earInnerEnd": "#8FB2E4",
+    "headband": "#DCE6F4",
+    "headbandSide": "#CAD8EC",
+    "headbandAccent": "#5A9BD8"
+  },
+  "proportions": {
+    "headScale": 1.55,
+    "bodyScale": 0.62,
+    "bodyWidthScale": 1.12,
+    "eyeScale": 1.18,
+    "legScale": 0.85,
+    "armScale": 0.9,
+    "armLengthScale": 0.72
+  },
+  "features": {
+    "catEars": true,
+    "ahoge": true,
+    "hoodie": "phase1",
+    "headband": true
+  },
+  "textures": {
+    "maxSize": 2048
+  },
+  "validation": {
+    "arkitCount": 52,
+    "actionCount": 8,
+    "maxTriangles": 50000
+  }
+}

@@ -11,5 +11,10 @@ DerivedData/
 .env*
 Secrets*.plist
 
+# Avatar source assets (only the exported USDZ is bundled)
+Assets/avatar/*.vrm
+Assets/avatar/*.blend
+Assets/avatar/reference/
+
 # macOS
 .DS_Store
