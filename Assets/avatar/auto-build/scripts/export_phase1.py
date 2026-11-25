@@ -69,6 +69,7 @@ def clean_stage(path: Path) -> None:
         "HoodFold",
         "NeckSkin",
         "HeadbandTop",
+        "DrawstringWhite",
         "DrawstringTip",
     }
 

@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "fps": 30,
+  "animation": "actions",
+  "totalFrames": 295,
+  "clips": {
+    "nod": {
+      "startFrame": 1,
+      "endFrame": 29
+    },
+    "wave": {
+      "startFrame": 32,
+      "endFrame": 70
+    },
+    "spin": {
+      "startFrame": 73,
+      "endFrame": 117
+    },
+    "heart": {
+      "startFrame": 120,
+      "endFrame": 156
+    },
+    "shyCover": {
+      "startFrame": 159,
+      "endFrame": 193
+    },
+    "leanBack": {
+      "startFrame": 196,
+      "endFrame": 231
+    },
+    "lookAround": {
+      "startFrame": 234,
+      "endFrame": 273
+    },
+    "notice": {
+      "startFrame": 276,
+      "endFrame": 295
+    }
+  }
+}

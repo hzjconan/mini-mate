@@ -33,9 +33,9 @@ public struct AvatarCapabilities: Sendable {
 
 | 项 | 要求 |
 |---|---|
-| 文件 | `App/MiniMate/Resources/Avatar/minimate.usdz` |
+| 文件 | `App/MiniMate/Resources/Avatar/minimate.usdz` + 同目录 `minimate.actions.json` |
 | blendShape | 必须包含 ARKit 52 个名称（如 `eyeBlinkLeft`、`jawOpen`、`mouthSmileLeft`……），大小写一致 |
-| 动作 | 动画名称与 `ActionTag` 一致：`nod`、`wave`、`spin`、`heart`、`shyCover`、`leanBack`、`lookAround`、`notice`；每个 0.8–2.5 s |
+| 动作 | USDZ 内只有一条绑定的 `SkelAnimation` 时间线；`minimate.actions.json` 声明 8 个片段（与 `ActionTag` 一一对应：`nod`、`wave`、`spin`、`heart`、`shyCover`、`leanBack`、`lookAround`、`notice`）的 `startFrame/endFrame`；每个 0.8–2.5 s。运行时按清单裁剪出独立片段 |
 | 骨骼 | 头部骨骼命名为 `Head`、颈部 `Neck`，用于视线跟随 |
 | 面数 | 建议 < 50k 三角面；贴图 ≤ 2048² |
 | 许可 | 来源与许可写在 `Assets/avatar/README.md` |

@@ -16,7 +16,7 @@
 
 `nod` · `wave` · `spin` · `heart` · `shyCover` · `leanBack` · `lookAround` · `notice`
 
-每个值对应一个 `ActionClip`，USDZ 中的动画名称 MUST 与 rawValue 一致。
+每个值对应一个 `ActionClip`。USDZ 内为一条 `SkelAnimation` 时间线，随包清单 `<asset>.actions.json` 用 rawValue 作为 key 声明每个片段的帧区间。
 
 ### UserEmotion（用户语气，M2 起由模型给出）
 

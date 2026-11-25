@@ -44,8 +44,9 @@ description: "M1 感知与形象的任务列表"
 
 - [x] T011 [US1] 选定 VRoid Perfect Sync 模型并确认许可；在 Blender 中导入、核对 52 个形态键命名、补齐缺失项（research.md D3）（用 hinzka/52blendshapes-for-VRoid-face 临时模型，52 个名称零缺失）
 - [x] T012 [US1] 制作或导入 8 个动作片段，命名与 `ActionTag` 一致；导出 `App/MiniMate/Resources/Avatar/minimate.usdz`（当前为程序化占位动作，14 MB，含 8 条 SkelAnimation；后续由 `Assets/avatar/auto-build/` 重新生成）
+- [x] T012a [US1] 修复 auto-build 多动作绑定：8 个动作合并为一条 `SkelAnimation` 时间线 + `actions.json`，运行时按清单裁出片段；修复 `spin` 旋转采样（`docs/avatar-action-binding-issue.md`）
 - [x] T013 [US1] `Kit/Sources/MMAvatar/BlendShapeIndex.swift`：加载后建立 ARKit 名称 → 索引映射，报告缺失项
-- [ ] T014 [US1] `Kit/Sources/MMAvatar/RealityKitAvatarRenderer.swift`：加载 USDZ、`BlendShapeWeightsComponent` 写入权重、动作播放与过渡（contracts/avatar-renderer.md R-1–R-5）
+- [x] T014 [US1] `Kit/Sources/MMAvatar/RealityKitAvatarRenderer.swift`：加载 USDZ、`BlendShapeWeightsComponent` 写入权重、动作播放与过渡（contracts/avatar-renderer.md R-1–R-5）
 - [x] T015 [P] [US1] `Kit/Tests/MMEmotionTests/IdleMotionLayerTests.swift`：眨眼间隔分布（2–6 s）、呼吸周期、权重范围（先写）
 - [x] T016 [US1] `Kit/Sources/MMAvatar/IdleMotionLayer.swift`：呼吸与眨眼（可注入时钟与随机源）
 - [x] T017 [US1] `App/MiniMate/Screens/AvatarScreen.swift`：`RealityView` + 固定虚拟相机 + 每帧驱动（当前为占位形象）

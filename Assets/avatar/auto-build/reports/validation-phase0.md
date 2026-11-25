@@ -15,7 +15,12 @@
 | 三角面 < 50k | ✅ | triangles=33076 |
 | 贴图 ≤ 2048² | ✅ | too_large=[] |
 | USDZ 存在 | ✅ | /Users/hzjconan/workspace/mini-mate/Assets/avatar/auto-build/out/minimate_phase0.usdz |
-| USDZ 8 条动作 | ✅ | animations=['heart', 'leanBack', 'lookAround', 'nod', 'notice', 'shyCover', 'spin', 'wave'] |
+| 动作清单存在 | ✅ | /Users/hzjconan/workspace/mini-mate/Assets/avatar/auto-build/out/minimate_phase0.actions.json |
+| 清单 8 个片段 | ✅ | clips=['heart', 'leanBack', 'lookAround', 'nod', 'notice', 'shyCover', 'spin', 'wave'] |
+| USDZ 单条动作时间线 | ✅ | animations=['actions'] |
+| USDZ 动作已绑定 | ✅ | animationSource=[Sdf.Path('/root/Armature/Armature/actions')] |
+| 时间线逐帧连续 | ✅ | samples=316 end=316.0 totalFrames=316 |
+| 时间线不含形态键动画 | ✅ |  |
 | USDZ ARKit 52 名称 | ✅ | missing=[] |
 | USDZ 骨架 | ✅ | skeletons=['Armature'] |
 | USDZ 可打开 | ✅ |  |

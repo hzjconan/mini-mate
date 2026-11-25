@@ -16,7 +16,8 @@
 ## 运行时约定
 
 - Xcode 文件系统同步组把资源平铺进 bundle，运行时路径是 `minimate.usdz`（没有 `Resources/Avatar/` 子目录）。
-- RealityKit 暴露的动画名可能带骨骼前缀（如 `Armature|nod`），`RealityKitAvatarRenderer` 需按后缀匹配。
+- 动作素材是**一条** `SkelAnimation` 时间线（名为 `actions`），片段边界写在同级的 `minimate.actions.json`（`tag → startFrame/endFrame`、`fps`、`totalFrames`）；复制素材时两个文件必须一起带走。`RealityKitAvatarRenderer` 用 `AnimationDefinition.trimmed` 在运行时裁出 8 个片段。
+- 旧素材仍可按动画名匹配（如 `Armature|nod`、`/root/Armature/Armature/nod[0]`），仅作回退。
 - 52 个 ARKit 形态键全部落在 `Face` 网格，`BlendShapeIndex.missingNames` 应为空。
 
 ## 已知风险

@@ -2,6 +2,14 @@
 
 小瓜形象的自动化构建工作目录。计划与审核方式见 [`PLAN.md`](./PLAN.md)。
 
+## 2026-11-24 真机颜色修订
+
+- 腿肤色：真机主光被短裤下摆投成整片阴影；App 场景关闭两盏方向光的实时阴影，腿部与脸部接受同样的主光 + 补光。
+- 抽绳/绳头：改为独立的无光照纯白材质 `DrawstringWhite`，PBR 光照不再把它染成灰蓝。
+- 袜子：下沿延伸进鞋口并贴合脚踝/脚背皮肤，鞋口处外扩填缝，袜口改为内收圆润卷边。
+
+详见 `reports/phase1-review.md`「Phase 1.3 真机颜色修订」。
+
 ## Phase 1.2 表情复审状态（2026-11-22）
 
 Phase 1 **已通过**；Phase 1.2 复审（脖子/猫耳）平均 **2.87**；眼睛/嘴巴/服色/呆毛修订已定稿（2026-11-23 你确认“可以了”）。眼睛/嘴巴/服色修订已完成：虹膜壳 5 mm，瞳孔贴图再向鼻梁 2 px；嘴巴不画唇线/唇阴影，只用单一深色内口腔 + idle 小张口：消除横线、悬空上唇线和突兀阴影；sad/concerned 不笑，surprised 小 o，happy 张口，playful 张嘴；吐舌仍待单独舌头层，happy / surprised / playful 单嘴；连帽衫按原稿取色，上半不再纯白。首轮产物保留在 `renders/phase1_before/`。先看：
@@ -12,7 +20,8 @@ open renders/phase1/review.html
 
 产物：
 
-- 候选 USDZ：`out/minimate_phase1.usdz`（约 13 MB）
+- 候选 USDZ：`out/minimate_phase1.usdz`（约 13 MB；8 个动作合并为一条名为 `actions` 的 `SkelAnimation` 时间线）
+- 动作清单：`out/minimate_phase1.actions.json`（`tag → startFrame/endFrame`，运行时据此裁剪）
 - Blender 场景：`work/phase1/minimate_phase1.blend`
 - 验证报告：`reports/validation-phase1.md`
 - 审核说明：`reports/phase1-review.md`

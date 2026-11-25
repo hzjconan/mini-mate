@@ -114,16 +114,29 @@ def main() -> None:
     if usdz_ok:
         from pxr import Usd, UsdSkel
 
+        manifest_path = USDZ.with_name(USDZ.stem + ".actions.json")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+        check("动作清单存在", manifest is not None, str(manifest_path))
+        if manifest is not None:
+            check(
+                "清单 8 个片段",
+                manifest.get("version") == 1
+                and set(manifest.get("clips", {})) == set(ACTION_NAMES),
+                f"clips={sorted(manifest.get('clips', {}))}",
+            )
+
         stage = Usd.Stage.Open(str(USDZ))
         animations = []
+        animation_source: list = []
         blend_shape_names: set[str] = set()
         skeleton_names: set[str] = set()
         mesh_names: set[str] = set()
         for prim in stage.Traverse():
             if prim.GetTypeName() == "SkelAnimation":
-                animations.append(prim.GetName())
+                animations.append(prim)
             if prim.GetTypeName() == "Skeleton":
                 skeleton_names.add(prim.GetName())
+                animation_source = prim.GetRelationship("skel:animationSource").GetTargets()
             if prim.GetTypeName() == "Mesh":
                 mesh_names.add(prim.GetName())
                 api = UsdSkel.BindingAPI(prim)
@@ -132,10 +145,58 @@ def main() -> None:
                     target = stage.GetPrimAtPath(target_path)
                     if target:
                         blend_shape_names.add(target.GetName())
+
+        timeline = animations[0] if len(animations) == 1 else None
         check(
-            "USDZ 8 条动作",
-            len(animations) == len(ACTION_NAMES) and set(animations) == set(ACTION_NAMES),
-            f"animations={sorted(animations)}",
+            "USDZ 单条动作时间线",
+            timeline is not None and timeline.GetName() == "actions",
+            f"animations={[prim.GetName() for prim in animations]}",
+        )
+        check(
+            "USDZ 动作已绑定",
+            timeline is not None and animation_source == [timeline.GetPath()],
+            f"animationSource={animation_source}",
+        )
+
+        if timeline is not None:
+            rotations = timeline.GetAttribute("rotations")
+            times = [int(round(t)) for t in rotations.GetTimeSamples()]
+            total_frames = int(manifest["totalFrames"]) if manifest else 0
+            check(
+                "时间线逐帧连续",
+                bool(times)
+                and times[0] == 1
+                and times[-1] == total_frames
+                and times == list(range(1, total_frames + 1)),
+                f"samples={len(times)} range={times[:1]}..{times[-1:]} totalFrames={total_frames}",
+            )
+            check(
+                "时间码与清单一致",
+                manifest is not None
+                and round(stage.GetTimeCodesPerSecond()) == round(float(manifest["fps"]))
+                and int(round(stage.GetEndTimeCode())) == total_frames,
+                f"fps={stage.GetTimeCodesPerSecond()} end={stage.GetEndTimeCode()}",
+            )
+            blend_weights = timeline.GetAttribute("blendShapeWeights")
+            check(
+                "时间线不含形态键动画",
+                blend_weights is None or not blend_weights.GetTimeSamples(),
+            )
+            if manifest:
+                invalid = [
+                    tag
+                    for tag, clip in manifest["clips"].items()
+                    if clip["startFrame"] < 1
+                    or clip["endFrame"] <= clip["startFrame"]
+                    or clip["endFrame"] > total_frames
+                ]
+                check("片段区间合法", not invalid, f"invalid={invalid}")
+
+        check("upAxis=Y", stage.GetMetadata("upAxis") == "Y", str(stage.GetMetadata("upAxis")))
+        check(
+            "metersPerUnit=1",
+            abs(float(stage.GetMetadata("metersPerUnit")) - 1.0) < 1e-6,
+            str(stage.GetMetadata("metersPerUnit")),
         )
         missing_usdz = [name for name in expected if name not in blend_shape_names]
         check("USDZ ARKit 52 名称", not missing_usdz, f"missing={missing_usdz}")
