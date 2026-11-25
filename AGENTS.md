@@ -40,3 +40,11 @@ App 构建与真机安装在 Xcode 中进行（工程为 objectVersion 77 文件
 - API Key 只存 Keychain（App）或环境变量（`mm-probe`）；不得写入仓库、日志、测试夹具
 - 语音样本（`Assets/voice-samples/*.wav`）含个人声音，不提交
 - 实测推翻 `docs/tech-selection.md` 中的结论时，同步修订该文档
+
+<!-- fish-996:task-handoff-rules:begin -->
+## 开发工作流约定（Task Handoff & Review Loop）
+
+- **新任务先出执行单**：收到“推进下一步”、规划任务、起草或按审稿意见修改执行单时，必须使用 `task-handoff` skill，在 `docs/handoffs/` 下起草并维护执行单；等用户审阅拍板并完成定稿后，再开始写代码。
+- **验收前走独立复审闭环**：每个任务实施完成（或按外部评审返工完成）、向用户汇报验收前，必须使用 `task-review-loop` skill 执行「实现 → 独立只读复审 → 核实修复/举证异议 → 再复审」闭环（最多 5 轮）。
+- **收口策略**：在用户明确确认验收前，不得勾选任务清单，不得 `git commit`，不得 `git push`。
+<!-- fish-996:task-handoff-rules:end -->
