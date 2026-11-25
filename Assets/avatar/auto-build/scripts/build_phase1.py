@@ -24,7 +24,8 @@ from pathlib import Path
 
 import bmesh
 import bpy
-from mathutils import Vector, kdtree
+import numpy as np
+from mathutils import Matrix, Vector, kdtree
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -216,6 +217,42 @@ def make_emissive_color_material(name: str, color, intensity: float = 1.0):
     bsdf.inputs["Roughness"].default_value = 1.0
     if "Specular IOR Level" in bsdf.inputs:
         bsdf.inputs["Specular IOR Level"].default_value = 0.0
+    material.node_tree.links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
+    return material
+
+
+def make_sock_white_material(
+    name: str = "SockWhite",
+    diffuse_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    emission_intensity: float = 0.70,
+    roughness: float = 0.85,
+):
+    """Bright white cotton sock material with subtle 3D shading under ACES.
+
+    Combines pure white diffuse reflection (preserving cylinder/cuff shading)
+    with moderate linear HDR emission so the socks stay clean white in
+    RealityKit without looking flat like an unlit sticker.
+    """
+    material = bpy.data.materials.get(name)
+    if material:
+        bpy.data.materials.remove(material)
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    material.node_tree.nodes.clear()
+    output = material.node_tree.nodes.new("ShaderNodeOutputMaterial")
+    bsdf = material.node_tree.nodes.new("ShaderNodeBsdfPrincipled")
+    bsdf.inputs["Base Color"].default_value = (*diffuse_color, 1.0)
+    bsdf.inputs["Emission Color"].default_value = (
+        emission_intensity,
+        emission_intensity,
+        emission_intensity,
+        1.0,
+    )
+    bsdf.inputs["Emission Strength"].default_value = 1.0
+    bsdf.inputs["Roughness"].default_value = roughness
+    bsdf.inputs["Metallic"].default_value = 0.0
+    if "Specular IOR Level" in bsdf.inputs:
+        bsdf.inputs["Specular IOR Level"].default_value = 0.15
     material.node_tree.links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
     return material
 
@@ -924,12 +961,12 @@ def add_socks(armature, body, nearest, material):
         (0.048, 0.0060),
         (0.060, 0.0055),
         (shoe_collar_z, 0.0050),
-        (0.090, 0.0025),
-        (0.112, 0.0025),
-        (0.138, 0.0025),
-        (0.158, 0.0025),
+        (0.090, 0.0038),
+        (0.112, 0.0038),
+        (0.138, 0.0038),
+        (0.158, 0.0038),
         # Rounded cuff: a short rolled lip that tucks back into the skin.
-        (0.164, 0.0040),
+        (0.164, 0.0048),
         (0.170, 0.0055),
         (0.175, 0.0060),
         (0.179, 0.0055),
@@ -1571,6 +1608,497 @@ def upgrade_ear_inner(ear_material) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase 1.4 refinements: straight calves, thicker hands, relaxed curled rest hands
+# ---------------------------------------------------------------------------
+
+
+DEFAULT_FINGER_CURL_DEG: dict[str, tuple[float, float, float]] = {
+    "Index": (6.0, 9.0, 7.0),
+    "Middle": (7.5, 11.0, 8.5),
+    "Ring": (9.5, 13.0, 10.0),
+    "Little": (11.5, 15.0, 11.5),
+}
+
+
+def _skin_vertex_indices(body) -> set[int]:
+    return {
+        vi
+        for poly in body.data.polygons
+        if poly.material_index == 0
+        for vi in poly.vertices
+    }
+
+
+def _vertex_group_weight(vertex, group_index: int | None) -> float:
+    if group_index is None:
+        return 0.0
+    for group in vertex.groups:
+        if group.group == group_index:
+            return float(group.weight)
+    return 0.0
+
+
+def _palm_frame(body, skin_verts: set[int], side: str) -> tuple[list[int], Vector, Vector]:
+    """Return (core_vertex_indices, palm_center_world, dorsal_palm_normal)."""
+    hand_vg = body.vertex_groups.get(f"J_Bip_{side}_Hand")
+    if hand_vg is None:
+        raise SystemExit(f"缺少顶点组 J_Bip_{side}_Hand")
+    mat = body.matrix_world
+    core_indices: list[int] = []
+    core_pts: list[list[float]] = []
+    for vi in skin_verts:
+        v = body.data.vertices[vi]
+        if _vertex_group_weight(v, hand_vg.index) <= 0.5:
+            continue
+        w = mat @ v.co
+        if w.y > -0.045:
+            core_indices.append(vi)
+            core_pts.append([w.x, w.y, w.z])
+    if len(core_pts) < 12:
+        raise SystemExit("手掌核心顶点采样异常")
+    arr = np.array(core_pts, dtype=float)
+    center = Vector(arr.mean(axis=0).tolist())
+    _eigvals, eigvecs = np.linalg.eigh(np.cov(arr.T))
+    normal = Vector(eigvecs[:, 0].tolist()).normalized()
+    # Enforce dorsal direction: right hand (-X) points -X, left hand (+X) points +X.
+    if (side == "R" and normal.x > 0.0) or (side == "L" and normal.x < 0.0):
+        normal = -normal
+    return core_indices, center, normal
+
+
+def slim_calves(
+    body,
+    z_min: float = 0.075,
+    z_max: float = 0.355,
+    calf_peak_z: float = 0.230,
+    max_width_shrink: float = 0.22,
+    max_back_flatten: float = 0.72,
+    max_front_trim: float = 0.25,
+    center_shift_y: float = -0.008,
+) -> dict[str, float]:
+    """Straighten and slim the calves between ankle and knee with C1-smooth falloff."""
+    skin_verts = _skin_vertex_indices(body)
+    mat = body.matrix_world
+    inv_mat = mat.inverted()
+    metrics: dict[str, float] = {}
+
+    for side, sign in (("L", 1.0), ("R", -1.0)):
+        lo_pts: list[Vector] = []
+        hi_pts: list[Vector] = []
+        target_verts: list[tuple[int, Vector]] = []
+        before_slice: list[Vector] = []
+
+        for vi in skin_verts:
+            w = mat @ body.data.vertices[vi].co
+            if w.x * sign <= 0.01 or abs(w.y) >= 0.15:
+                continue
+            if 0.082 <= w.z <= 0.098:
+                lo_pts.append(w)
+            if 0.322 <= w.z <= 0.342:
+                hi_pts.append(w)
+            if 0.22 <= w.z <= 0.26:
+                before_slice.append(w)
+            if z_min < w.z < z_max:
+                target_verts.append((vi, w))
+
+        if len(lo_pts) < 4 or len(hi_pts) < 4:
+            raise SystemExit("小腿锚点采样不足，无法执行直腿塑形")
+
+        cx_lo = sum(p.x for p in lo_pts) / len(lo_pts)
+        cy_lo = sum(p.y for p in lo_pts) / len(lo_pts)
+        y_back_lo = max(p.y for p in lo_pts)
+        cx_hi = sum(p.x for p in hi_pts) / len(hi_pts)
+        cy_hi = sum(p.y for p in hi_pts) / len(hi_pts)
+        y_back_hi = max(p.y for p in hi_pts)
+
+        if before_slice:
+            metrics[f"{side}_wx_before"] = max(p.x for p in before_slice) - min(p.x for p in before_slice)
+            metrics[f"{side}_dy_before"] = max(p.y for p in before_slice) - min(p.y for p in before_slice)
+            metrics[f"{side}_yback_before"] = max(p.y for p in before_slice)
+
+        for vi, w in target_verts:
+            z = w.z
+            t = min(1.0, max(0.0, (z - 0.090) / (0.330 - 0.090)))
+            cx = cx_lo + (cx_hi - cx_lo) * t
+            cy = cy_lo + (cy_hi - cy_lo) * t
+            y_back_line = y_back_lo + (y_back_hi - y_back_lo) * t
+
+            edge_env = smoothstep((z - z_min) / 0.045) * smoothstep((z_max - z) / 0.050)
+            bell = math.exp(-(((z - calf_peak_z) / 0.068) ** 2))
+            weight = edge_env * bell
+
+            new_x = cx + (w.x - cx) * (1.0 - max_width_shrink * weight)
+            shifted_y = w.y + center_shift_y * weight
+            if shifted_y > y_back_line:
+                excess = shifted_y - y_back_line
+                new_y = y_back_line + excess * (1.0 - max_back_flatten * edge_env)
+            elif shifted_y < cy:
+                new_y = cy + (shifted_y - cy) * (1.0 - max_front_trim * weight)
+            else:
+                new_y = shifted_y
+
+            body.data.vertices[vi].co = inv_mat @ Vector((new_x, new_y, z))
+
+        after_slice = [
+            mat @ body.data.vertices[vi].co
+            for vi, _ in target_verts
+            if 0.22 <= (mat @ body.data.vertices[vi].co).z <= 0.26
+        ]
+        if after_slice:
+            metrics[f"{side}_wx_after"] = max(p.x for p in after_slice) - min(p.x for p in after_slice)
+            metrics[f"{side}_dy_after"] = max(p.y for p in after_slice) - min(p.y for p in after_slice)
+            metrics[f"{side}_yback_after"] = max(p.y for p in after_slice)
+
+    body.data.update()
+    print(
+        "CALVES_SLIMMED "
+        f"L_wx={metrics.get('L_wx_before', 0.0):.4f}->{metrics.get('L_wx_after', 0.0):.4f} "
+        f"L_dy={metrics.get('L_dy_before', 0.0):.4f}->{metrics.get('L_dy_after', 0.0):.4f} "
+        f"L_yback={metrics.get('L_yback_before', 0.0):.4f}->{metrics.get('L_yback_after', 0.0):.4f} "
+        f"R_wx={metrics.get('R_wx_before', 0.0):.4f}->{metrics.get('R_wx_after', 0.0):.4f} "
+        f"R_dy={metrics.get('R_dy_before', 0.0):.4f}->{metrics.get('R_dy_after', 0.0):.4f} "
+        f"R_yback={metrics.get('R_yback_before', 0.0):.4f}->{metrics.get('R_yback_after', 0.0):.4f}"
+    )
+    return metrics
+
+
+def thicken_hands(
+    armature,
+    body,
+    dorsal_scale: float = 1.56,
+    palmar_scale: float = 1.44,
+    proximal_finger_scale: float = 1.28,
+    distal_finger_scale: float = 1.16,
+    thumb_scale: float = 1.22,
+) -> dict[str, float]:
+    """Thicken flattened palms and fingers along the palm normal while tapering to 1.0x at the wrist."""
+    _ = armature
+    skin_verts = _skin_vertex_indices(body)
+    mat = body.matrix_world
+    inv_mat = mat.inverted()
+    vg_index = {vg.name: vg.index for vg in body.vertex_groups}
+    metrics: dict[str, float] = {}
+
+    for side in ("R", "L"):
+        core_indices, palm_center, palm_normal = _palm_frame(body, skin_verts, side)
+        core_proj_before = np.array(
+            [(mat @ body.data.vertices[vi].co).dot(palm_normal) for vi in core_indices],
+            dtype=float,
+        )
+        thick_before = float(np.ptp(core_proj_before))
+        if thick_before < 0.005:
+            raise SystemExit("手掌核心顶点采样异常")
+        metrics[f"{side}_thick_before"] = thick_before
+
+        hand_idx = vg_index.get(f"J_Bip_{side}_Hand")
+        arm_idx = vg_index.get(f"J_Bip_{side}_LowerArm")
+        p1_indices = [
+            vg_index[f"J_Bip_{side}_{finger}1"]
+            for finger in ("Index", "Middle", "Ring", "Little")
+            if f"J_Bip_{side}_{finger}1" in vg_index
+        ]
+        p23_indices = [
+            vg_index[f"J_Bip_{side}_{finger}{seg}"]
+            for finger in ("Index", "Middle", "Ring", "Little")
+            for seg in (2, 3)
+            if f"J_Bip_{side}_{finger}{seg}" in vg_index
+        ]
+        thumb_indices = [
+            vg_index[f"J_Bip_{side}_Thumb{seg}"]
+            for seg in (1, 2, 3)
+            if f"J_Bip_{side}_Thumb{seg}" in vg_index
+        ]
+        all_phalanx_indices = p1_indices + p23_indices + thumb_indices
+
+        # Local midplane projection per phalanx so fingers/thumbs thicken symmetrically
+        # without shifting sideways relative to the palm.
+        d_palm = float(palm_center.dot(palm_normal))
+        d_by_group: dict[int, float] = {}
+        for gidx in all_phalanx_indices:
+            pts = [
+                (mat @ body.data.vertices[vi].co).dot(palm_normal)
+                for vi in skin_verts
+                if _vertex_group_weight(body.data.vertices[vi], gidx) > 0.5
+            ]
+            if pts:
+                d_by_group[gidx] = float(sum(pts) / len(pts))
+
+        p1_set = set(p1_indices)
+        p23_set = set(p23_indices)
+        thumb_set = set(thumb_indices)
+
+        for vi in skin_verts:
+            v = body.data.vertices[vi]
+            w_hand = 0.0
+            w_arm = 0.0
+            w_p1 = 0.0
+            w_p23 = 0.0
+            w_thumb = 0.0
+            phalanx_w: list[tuple[int, float]] = []
+            thumb_w: list[tuple[int, float]] = []
+
+            for g in v.groups:
+                gi = g.group
+                gw = float(g.weight)
+                if gw <= 0.0:
+                    continue
+                if gi == hand_idx:
+                    w_hand += gw
+                elif gi == arm_idx:
+                    w_arm += gw
+                elif gi in p1_set:
+                    w_p1 += gw
+                    phalanx_w.append((gi, gw))
+                elif gi in p23_set:
+                    w_p23 += gw
+                    phalanx_w.append((gi, gw))
+                elif gi in thumb_set:
+                    w_thumb += gw
+                    thumb_w.append((gi, gw))
+
+            active_w = w_hand + w_p1 + w_p23 + w_thumb
+            if active_w <= 0.01:
+                continue
+
+            if w_thumb > 0.5 and thumb_w:
+                tw_sum = sum(gw for gi, gw in thumb_w if gi in d_by_group)
+                d_ref = (
+                    sum(d_by_group[gi] * gw for gi, gw in thumb_w if gi in d_by_group) / tw_sum
+                    if tw_sum > 1e-6
+                    else d_palm
+                )
+            else:
+                num = w_hand * d_palm
+                den = w_hand
+                for gi, gw in phalanx_w + thumb_w:
+                    if gi in d_by_group:
+                        num += d_by_group[gi] * gw
+                        den += gw
+                d_ref = num / den if den > 1e-6 else d_palm
+
+            w_pos = mat @ v.co
+            signed_d = float(w_pos.dot(palm_normal)) - d_ref
+            hand_s = dorsal_scale if signed_d >= 0.0 else palmar_scale
+            total_w = active_w + w_arm
+            target_scale = (
+                w_hand * hand_s
+                + w_p1 * proximal_finger_scale
+                + w_p23 * distal_finger_scale
+                + w_thumb * thumb_scale
+                + w_arm * 1.0
+            ) / total_w
+            new_world = w_pos + palm_normal * (signed_d * (target_scale - 1.0))
+            v.co = inv_mat @ new_world
+
+        core_proj_after = np.array(
+            [(mat @ body.data.vertices[vi].co).dot(palm_normal) for vi in core_indices],
+            dtype=float,
+        )
+        metrics[f"{side}_thick_after"] = float(np.ptp(core_proj_after))
+
+    body.data.update()
+    print(
+        "HANDS_THICKENED "
+        f"L={metrics.get('L_thick_before', 0.0):.4f}->{metrics.get('L_thick_after', 0.0):.4f} "
+        f"R={metrics.get('R_thick_before', 0.0):.4f}->{metrics.get('R_thick_after', 0.0):.4f}"
+    )
+    return metrics
+
+
+def curl_rest_hands(
+    armature,
+    body,
+    finger_angles_deg: dict[str, tuple[float, float, float]] | None = None,
+    thumb_angles_deg: tuple[float, float] = (8.0, 12.0),
+) -> dict[str, float]:
+    """Bake a natural relaxed finger curl into Body rest geometry around anatomical joints.
+
+    Avoids Pose-Mode armature_apply on the inverted/offset VRM finger bones so
+    skeletonRestPoses and all 8 action clips remain 100% compatible.
+    """
+    _ = armature
+    angles_map = finger_angles_deg or DEFAULT_FINGER_CURL_DEG
+    skin_verts = _skin_vertex_indices(body)
+    mat = body.matrix_world
+    inv_mat = mat.inverted()
+    vg_index = {vg.name: vg.index for vg in body.vertex_groups}
+    band = 0.008
+    metrics: dict[str, float] = {}
+
+    def group_verts_world(group_name: str) -> list[tuple[int, Vector]]:
+        gidx = vg_index.get(group_name)
+        if gidx is None:
+            return []
+        result: list[tuple[int, Vector]] = []
+        for vi in skin_verts:
+            v = body.data.vertices[vi]
+            if _vertex_group_weight(v, gidx) > 0.5:
+                result.append((vi, mat @ v.co))
+        return result
+
+    def centroid(pts: list[tuple[int, Vector]]) -> Vector:
+        total = Vector((0.0, 0.0, 0.0))
+        for _, p in pts:
+            total += p
+        return total / max(1, len(pts))
+
+    for side in ("R", "L"):
+        _core_idx, palm_center, palm_normal = _palm_frame(body, skin_verts, side)
+        mid2_pts = group_verts_world(f"J_Bip_{side}_Middle2")
+        if not mid2_pts:
+            raise SystemExit(f"缺少 J_Bip_{side}_Middle2 顶点，无法弯曲手指")
+        finger_dir = (centroid(mid2_pts) - palm_center).normalized()
+        bend_axis = finger_dir.cross(palm_normal).normalized()
+        if ((Matrix.Rotation(0.1, 3, bend_axis) @ finger_dir) - finger_dir).dot(-palm_normal) <= 0.0:
+            bend_axis = -bend_axis
+
+        index_vert_ids: set[int] = set()
+        index1_center: Vector | None = None
+
+        for finger in ("Index", "Middle", "Ring", "Little"):
+            a1, a2, a3 = angles_map[finger]
+            g1_name = f"J_Bip_{side}_{finger}1"
+            g2_name = f"J_Bip_{side}_{finger}2"
+            g3_name = f"J_Bip_{side}_{finger}3"
+            pts1 = group_verts_world(g1_name)
+            pts2 = group_verts_world(g2_name)
+            pts3 = group_verts_world(g3_name)
+            if not pts1 or not pts2 or not pts3:
+                raise SystemExit(f"缺少 {side}_{finger} 指节顶点")
+
+            c1 = centroid(pts1)
+            c2 = centroid(pts2)
+            c3 = centroid(pts3)
+            if finger == "Index":
+                index1_center = c1.copy()
+
+            proj1 = np.array([p.dot(finger_dir) for _, p in pts1], dtype=float)
+            q15 = float(np.quantile(proj1, 0.15))
+            p_mcp = c1 + finger_dir * (q15 - c1.dot(finger_dir))
+            p_pip = (c1 + c2) * 0.5
+            p_dip = (c2 + c3) * 0.5
+
+            len_before = (c3 - p_mcp).length
+            c3_before = c3.copy()
+
+            g1_idx = vg_index[g1_name]
+            g2_idx = vg_index[g2_name]
+            g3_idx = vg_index[g3_name]
+            d_mcp = p_mcp.dot(finger_dir)
+            d_pip = p_pip.dot(finger_dir)
+            d_dip = p_dip.dot(finger_dir)
+
+            for vi in skin_verts:
+                v = body.data.vertices[vi]
+                w_f = (
+                    _vertex_group_weight(v, g1_idx)
+                    + _vertex_group_weight(v, g2_idx)
+                    + _vertex_group_weight(v, g3_idx)
+                )
+                if w_f <= 0.01:
+                    continue
+                if finger == "Index":
+                    index_vert_ids.add(vi)
+                w_pos = mat @ v.co
+                proj = w_pos.dot(finger_dir)
+                s1 = smoothstep((proj - (d_mcp - band * 0.5)) / band) * min(1.0, w_f)
+                s2 = smoothstep((proj - (d_pip - band * 0.5)) / band) * min(1.0, w_f)
+                s3 = smoothstep((proj - (d_dip - band * 0.5)) / band) * min(1.0, w_f)
+
+                # Forward-kinematics order (DIP -> PIP -> MCP) keeps segment lengths rigid.
+                p = w_pos.copy()
+                for pivot, ang_deg, s in ((p_dip, a3, s3), (p_pip, a2, s2), (p_mcp, a1, s1)):
+                    if s > 1e-6:
+                        rot = Matrix.Rotation(math.radians(ang_deg * s), 3, bend_axis)
+                        p = pivot + rot @ (p - pivot)
+                v.co = inv_mat @ p
+
+            c3_after = centroid([(vi, mat @ body.data.vertices[vi].co) for vi, _ in pts3])
+            palmar_disp = float((c3_after - c3_before).dot(-palm_normal))
+            len_after = (c3_after - p_mcp).length
+            len_change = abs(len_after - len_before) / max(len_before, 1e-6)
+            metrics[f"{side}_{finger}_palmar_disp"] = palmar_disp
+            metrics[f"{side}_{finger}_len_change"] = len_change
+            if palmar_disp <= 0.0 or len_change > 0.10:
+                raise SystemExit(
+                    f"静置手型弯曲方向或长度畸变: {side}_{finger} disp={palmar_disp:.4f} len_change={len_change:.4f}"
+                )
+
+        # Gentle inward thumb curl toward palm & index side.
+        t1_name = f"J_Bip_{side}_Thumb1"
+        t2_name = f"J_Bip_{side}_Thumb2"
+        t3_name = f"J_Bip_{side}_Thumb3"
+        tpts1 = group_verts_world(t1_name)
+        tpts2 = group_verts_world(t2_name)
+        tpts3 = group_verts_world(t3_name)
+        if not tpts1 or not tpts2 or not tpts3 or index1_center is None:
+            raise SystemExit(f"缺少 {side}_Thumb 顶点")
+
+        tc1 = centroid(tpts1)
+        tc2 = centroid(tpts2)
+        tc3 = centroid(tpts3)
+        p_t2 = (tc1 + tc2) * 0.5
+        p_t3 = (tc2 + tc3) * 0.5
+        thumb_dir = (tc3 - tc1).normalized()
+        inward = ((-palm_normal) * 0.70 + (index1_center - tc3).normalized() * 0.30).normalized()
+        thumb_axis = thumb_dir.cross(inward).normalized()
+        if ((Matrix.Rotation(0.1, 3, thumb_axis) @ thumb_dir) - thumb_dir).dot(inward) <= 0.0:
+            thumb_axis = -thumb_axis
+
+        t1_idx = vg_index[t1_name]
+        t2_idx = vg_index[t2_name]
+        t3_idx = vg_index[t3_name]
+        d_t2 = p_t2.dot(thumb_dir)
+        d_t3 = p_t3.dot(thumb_dir)
+        tc3_before = tc3.copy()
+        ta1, ta2 = thumb_angles_deg
+
+        for vi in skin_verts:
+            v = body.data.vertices[vi]
+            w_t = (
+                _vertex_group_weight(v, t1_idx)
+                + _vertex_group_weight(v, t2_idx)
+                + _vertex_group_weight(v, t3_idx)
+            )
+            if w_t <= 0.01:
+                continue
+            w_pos = mat @ v.co
+            proj = w_pos.dot(thumb_dir)
+            s_t2 = smoothstep((proj - (d_t2 - band * 0.5)) / band) * min(1.0, w_t)
+            s_t3 = smoothstep((proj - (d_t3 - band * 0.5)) / band) * min(1.0, w_t)
+            p = w_pos.copy()
+            for pivot, ang_deg, s in ((p_t3, ta2, s_t3), (p_t2, ta1, s_t2)):
+                if s > 1e-6:
+                    rot = Matrix.Rotation(math.radians(ang_deg * s), 3, thumb_axis)
+                    p = pivot + rot @ (p - pivot)
+            v.co = inv_mat @ p
+
+        tc3_after = centroid([(vi, mat @ body.data.vertices[vi].co) for vi, _ in tpts3])
+        thumb_disp = float((tc3_after - tc3_before).dot(-palm_normal))
+        metrics[f"{side}_Thumb_palmar_disp"] = thumb_disp
+
+        # Verify Thumb3 does not collide with Index.
+        thumb3_world = [mat @ body.data.vertices[vi].co for vi, _ in tpts3]
+        index_world = [mat @ body.data.vertices[vi].co for vi in index_vert_ids]
+        min_thumb_index = min((tp - ip).length for tp in thumb3_world for ip in index_world)
+        metrics[f"{side}_thumb_index_min_dist"] = min_thumb_index
+        if thumb_disp <= 0.0 or min_thumb_index < 0.010:
+            raise SystemExit(
+                f"静置手型拇指弯曲异常或穿模: {side} disp={thumb_disp:.4f} min_dist={min_thumb_index:.4f}"
+            )
+
+    body.data.update()
+    print(
+        "HANDS_CURLED "
+        f"R_idx={metrics['R_Index_palmar_disp']:.4f} R_lit={metrics['R_Little_palmar_disp']:.4f} "
+        f"R_th={metrics['R_Thumb_palmar_disp']:.4f} R_ti={metrics['R_thumb_index_min_dist']:.4f} "
+        f"L_idx={metrics['L_Index_palmar_disp']:.4f} L_lit={metrics['L_Little_palmar_disp']:.4f} "
+        f"L_th={metrics['L_Thumb_palmar_disp']:.4f} L_ti={metrics['L_thumb_index_min_dist']:.4f}"
+    )
+    return metrics
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -1648,6 +2176,7 @@ def main() -> None:
     # white; emission is raised to 2.5x so tone mapping still resolves them as
     # white against the hoodie (plain emission 1.0 lands near the hoodie grey).
     string_material = make_emissive_color_material("DrawstringWhite", (1.0, 1.0, 1.0), intensity=2.5)
+    sock_material = make_sock_white_material()
     ear_material = make_emissive_textured_material("EarInnerGradient", ear_image, strength=1.0)
 
     cut_shorts(armature, body)
@@ -1656,9 +2185,14 @@ def main() -> None:
     body.material_slots[3].material = hoodie_material
     set_tops_uvs(body)
 
+    # Phase 1.4 geometry refinements must run before NearestSkinWeights and add_socks.
+    slim_calves(body)
+    thicken_hands(armature, body)
+    curl_rest_hands(armature, body)
+
     nearest = NearestSkinWeights(body)
     add_shorts_hem_bands(armature, body, trim_material, nearest)
-    add_socks(armature, body, nearest, trim_material)
+    add_socks(armature, body, nearest, sock_material)
     add_hoodie_hem(armature, hoodie_material, rib_material)
     add_sleeves(armature, nearest, hoodie_material, rib_material)
     add_pocket(armature, body, hoodie_material, seam_material)
@@ -1670,6 +2204,15 @@ def main() -> None:
     add_drawstrings(armature, body, string_material, string_material)
     rebuild_cat_ears(armature, headbandtop_material)
     upgrade_ear_inner(ear_material)
+
+    # Sync all 8 action clips from avatar_common.py (prevents stale phase0 actions).
+    ranges = ac.make_actions(armature, 30)
+    if armature.animation_data:
+        armature.animation_data.action = None
+    scene.render.fps = 30
+    scene.frame_start = 1
+    scene.frame_end = max(ranges.values())
+    print(f"ACTIONS {sorted(ranges)}")
 
     bpy.context.view_layer.update()
     bpy.ops.wm.save_as_mainfile(filepath=str(OUT_BLEND), check_existing=False)

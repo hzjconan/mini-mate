@@ -26,12 +26,25 @@ USDZ = OUT_DIR / "minimate_phase1.usdz"
 
 
 def fix_preview_surface() -> None:
-    """MToon's compatible Principled node defaults to metallic=1; fix for USD."""
+    """MToon's compatible Principled node defaults to metallic=1; fix for USD.
+
+    Only touch MToon compatibility nodes so custom Principled materials
+    (e.g. SockWhite, DrawstringWhite, MouthInner) keep their explicit
+    Roughness and Specular IOR Level.
+    """
+    fixed = 0
     for material in bpy.data.materials:
         if not material.use_nodes or not material.node_tree:
             continue
         for node in material.node_tree.nodes:
             if node.type != "BSDF_PRINCIPLED":
+                continue
+            metallic = (
+                float(node.inputs["Metallic"].default_value)
+                if "Metallic" in node.inputs
+                else 0.0
+            )
+            if node.name != "Mtoon1Material.CompatibleShader" and metallic <= 0.5:
                 continue
             if "Metallic" in node.inputs:
                 node.inputs["Metallic"].default_value = 0.0
@@ -39,7 +52,8 @@ def fix_preview_surface() -> None:
                 node.inputs["Roughness"].default_value = 0.7
             if "Specular IOR Level" in node.inputs:
                 node.inputs["Specular IOR Level"].default_value = 0.5
-    print("PBR_PREVIEW_FIXED")
+            fixed += 1
+    print(f"PBR_PREVIEW_FIXED count={fixed}")
 
 
 def clean_stage(path: Path) -> None:
@@ -71,6 +85,7 @@ def clean_stage(path: Path) -> None:
         "HeadbandTop",
         "DrawstringWhite",
         "DrawstringTip",
+        "SockWhite",
     }
 
     stage = Usd.Stage.Open(str(path))

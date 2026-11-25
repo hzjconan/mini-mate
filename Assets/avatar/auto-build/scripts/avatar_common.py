@@ -163,12 +163,8 @@ def make_actions(armature, fps: int = 30) -> dict[str, int]:
         "J_Bip_R_LowerArm": Quaternion((0.707279, -0.187802, 0.368186, 0.573520)),
         "J_Bip_R_Hand": Quaternion((0.910562, -0.202731, -0.044672, 0.357466)),
     }
-    # 五指并拢、略微收拢（局部 X 负向朝掌心），指尖朝上。
-    for _prefix in ("Index", "Middle", "Ring", "Little"):
-        for _index in (1, 2, 3):
-            shy_pose[f"J_Bip_R_{_prefix}{_index}"] = Quaternion(
-                (1, 0, 0), math.radians(-5)
-            )
+    # 静置手型已在网格空间烘焙自然微弯，shyCover 不再叠加额外四指弯曲，
+    # 既呈现柔和遮嘴手势，又避免手掌/指尖向嘴唇方向二次内扣导致穿模。
     shy_pose_rest = {name: Quaternion((1, 0, 0), 0.0) for name in shy_pose}
 
     # 世界轴语义动作：X 正 = 低头/前倾（角色面向 -Y），Y = 侧向，Z = 转身。
@@ -206,7 +202,7 @@ def make_actions(armature, fps: int = 30) -> dict[str, int]:
                     right_lower_arm: (0, 0.35, 0),
                     right_hand: hand_half,
                     head: (0, -0.04, 0),
-                    **finger_curl(-6, -5),
+                    **finger_curl(-2, -1.5),
                 },
             ),
             (
@@ -217,7 +213,7 @@ def make_actions(armature, fps: int = 30) -> dict[str, int]:
                     right_lower_arm: (0, 1.30, 0),
                     right_hand: hand_wave,
                     head: (0, -0.10, 0),
-                    **finger_curl(-12, -10),
+                    **finger_curl(-4, -3),
                 },
             ),
             (
@@ -228,7 +224,7 @@ def make_actions(armature, fps: int = 30) -> dict[str, int]:
                     right_lower_arm: (0, 0.90, 0),
                     right_hand: hand_wave,
                     head: (0, -0.10, 0),
-                    **finger_curl(-12, -10),
+                    **finger_curl(-4, -3),
                 },
             ),
             (
@@ -239,7 +235,7 @@ def make_actions(armature, fps: int = 30) -> dict[str, int]:
                     right_lower_arm: (0, 1.45, 0),
                     right_hand: hand_wave,
                     head: (0, -0.10, 0),
-                    **finger_curl(-12, -10),
+                    **finger_curl(-4, -3),
                 },
             ),
             (
@@ -250,7 +246,7 @@ def make_actions(armature, fps: int = 30) -> dict[str, int]:
                     right_lower_arm: (0, 0.90, 0),
                     right_hand: hand_wave,
                     head: (0, -0.10, 0),
-                    **finger_curl(-12, -10),
+                    **finger_curl(-4, -3),
                 },
             ),
             (
@@ -261,7 +257,7 @@ def make_actions(armature, fps: int = 30) -> dict[str, int]:
                     right_lower_arm: (0, 0.40, 0),
                     right_hand: hand_half,
                     head: (0, -0.04, 0),
-                    **finger_curl(-6, -5),
+                    **finger_curl(-2, -1.5),
                 },
             ),
             (

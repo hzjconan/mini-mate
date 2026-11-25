@@ -206,3 +206,17 @@ Phase 0 的 52 键与 8 动作基线保持不变。
 | 袜口与鞋口之间露出脚踝 | 袜子下沿延伸到鞋口以下并贴合脚踝/脚背皮肤（只对皮肤 BVH 采样，避免采到鞋壳）；鞋口处少量外扩填缝；袜口改为内收的圆润卷边。 |
 
 验证：52 形态键、8 动作、USDZ 单条时间线、三角面 39,032、贴图 ≤ 2048² 全部通过。
+
+## Phase 1.4 真机精修（2026-11-25）
+
+针对真机验收反馈的四项建模与材质精修，全部落地至 `scripts/build_phase1.py`、`scripts/avatar_common.py`、`scripts/export_phase1.py` 并通过 `validate_phase1.py` 全量 32 项确定性门禁：
+
+| 精修项 | 根因与做法 | 实测数据（前 → 后） |
+|---|---|---|
+| 小腿改美少女直腿 | `slim_calves()` 在 `z ∈ (0.075, 0.355)` 用 $C^1$ 平滑窗沿膝-踝直线收窄横向宽度并压平后侧腓肠肌凸包，鞋口与短裤下摆零变形；袜子随后基于新皮肤重采样并将中段径向偏置微调至 `3.8 mm` 消除透肤 | 峰值切片 `z ∈ [0.22, 0.26]`：`w_x 9.57 cm → 7.62 cm`、`d_y 11.93 cm → 8.89 cm`、`y_back +9.59 cm → +6.74 cm`；踝/大腿边界最大位移 `0.000000 m` |
+| 手掌加厚 | `thicken_hands()` 沿掌面法向加厚（手背 `1.56×` / 掌心 `1.44×`），向指节平滑过渡并在腕部归 `1.0×` 零穿袖口 | 左右掌心 PCA 厚度：`2.42 cm → 3.31 cm`（左右差 `0.0000 m`） |
+| 静置手型自然微弯 | `curl_rest_hands()` 避开反向/偏置的 VRM 指骨，在网格空间绕 MCP/PIP/DIP 真实解剖关节按前向运动学顺序（DIP→PIP→MCP）做递进微弯（食指→小指 `22°→38°`，拇指 `8°/12°`）；同步收敛 `wave` 附加手指弯曲（`-4°/-3°`）并移除 `shyCover` 冗余 `-5°` 叠弯 | 指尖向掌心位移 `Index 1.06 cm → Little 1.59 cm`（指长变化 `0.2%–0.7%`）；`shyCover` 手脸最小间隙 `2.3 mm`、`heart` 双手最小间隙 `41.0 mm` |
+| 袜子提白 | 新建独立材质 `SockWhite`（`Base Color=1.0` + 线性 HDR `Emission=0.70` + `Roughness=0.85`）；`export_phase1.py` 仅修复 MToon 兼容节点并把 `SockWhite` 加入 `opaque_materials` | USDZ `/root/_materials/SockWhite`：`opacity=1.0`、`metallic=0.0`、`roughness=0.85`、`emissive=(0.7, 0.7, 0.7)`、`diffuse=(1.0, 1.0, 1.0)` |
+| 管线防回归 | 在 `build_phase1.py` 保存前补齐 `ac.make_actions(armature, 30)`，确保 8 条动作与 `avatar_common.py` 最新定义同步 | `shyCover` 第 15 帧 `J_Bip_R_UpperArm` 与 `avatar_common.py` 夹角 `0.000°` |
+
+全量门禁：`VALIDATION_OK triangles=39032`（32/32 项通过；52 ARKit / 124 形态键 / 8 动作 / 295 帧零回归）。新增局部特写 `leg_side_closeup.png`、`leg_back_closeup.png`、`hand_closeup.png` 已接入 `renders/phase1/review.html`。

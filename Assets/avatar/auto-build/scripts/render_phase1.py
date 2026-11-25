@@ -143,6 +143,59 @@ def set_head_camera(camera, objects) -> None:
     look_at(camera, center)
 
 
+def render_phase14_closeups(camera, scene, center: Vector) -> None:
+    """Render Phase 1.4 closeups for straight calves/white socks and thicker curled hands."""
+    # 1. Leg side & back closeups (z = 0.0..0.44)
+    leg_target = Vector((center.x, center.y, 0.21))
+    camera.data.type = "ORTHO"
+    camera.data.sensor_fit = "VERTICAL"
+    camera.data.ortho_scale = 0.44
+    camera.location = (center.x + 3.0, center.y, 0.21)
+    look_at(camera, leg_target)
+    render_still(camera, scene, OUT / "leg_side_closeup.png", 768, 768)
+
+    camera.location = (center.x, center.y + 3.0, 0.21)
+    look_at(camera, leg_target)
+    render_still(camera, scene, OUT / "leg_back_closeup.png", 768, 768)
+
+    # 2. Right-hand multi-angle closeup (front, palm-3/4, dorsal-side, back-3/4)
+    body = bpy.data.objects.get("Body")
+    hand_center = Vector((-0.26, -0.04, 0.44))
+    hand_scale = 0.19
+    if body is not None:
+        prefixes = ("J_Bip_R_Hand", "J_Bip_R_Thumb", "J_Bip_R_Index", "J_Bip_R_Middle", "J_Bip_R_Ring", "J_Bip_R_Little")
+        gids = {vg.index for vg in body.vertex_groups if vg.name.startswith(prefixes)}
+        mat = body.matrix_world
+        pts = [
+            mat @ v.co
+            for v in body.data.vertices
+            if any(g.group in gids and g.weight > 0.3 for g in v.groups)
+        ]
+        if pts:
+            mins = Vector((min(p.x for p in pts), min(p.y for p in pts), min(p.z for p in pts)))
+            maxs = Vector((max(p.x for p in pts), max(p.y for p in pts), max(p.z for p in pts)))
+            hand_center = (mins + maxs) * 0.5
+            hand_scale = max(0.16, (maxs - mins).length * 1.15)
+
+    hand_dir = OUT / "hands"
+    hand_dir.mkdir(parents=True, exist_ok=True)
+    camera.data.ortho_scale = hand_scale
+    angles = [
+        ("front", Vector((0.0, -1.6, 0.0))),
+        ("palm_side", Vector((1.2, -1.0, -0.1))),
+        ("dorsal_side", Vector((-1.6, -0.2, 0.0))),
+        ("three_quarter", Vector((-0.9, -1.3, 0.2))),
+    ]
+    hand_paths: list[Path] = []
+    for tag, offset in angles:
+        camera.location = hand_center + offset
+        look_at(camera, hand_center)
+        path = hand_dir / f"hand_{tag}.png"
+        render_still(camera, scene, path, 512, 512)
+        hand_paths.append(path)
+    tile_images(hand_paths, 2, 512, 512, OUT / "hand_closeup.png")
+
+
 def render_still(camera, scene, path: Path, width: int, height: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     scene.camera = camera
@@ -335,6 +388,15 @@ def write_review_html(expression_paths: list[Path], action_paths: list[Path], qu
         action_html = f'<section><h2>8 动作抽帧</h2><div class="grid actions">{items}</div></section>'
 
     extras_html = ""
+    if (OUT / "leg_side_closeup.png").exists():
+        extras_html += (
+            '<section><h2>Phase 1.4 精修局部特写（直腿 / 白袜 / 厚掌 / 微弯手）</h2>'
+            '<div class="compare">'
+            '<figure><img src="leg_side_closeup.png" alt="leg side"><figcaption>小腿与白袜侧面特写</figcaption></figure>'
+            '<figure><img src="leg_back_closeup.png" alt="leg back"><figcaption>小腿与白袜背面特写</figcaption></figure>'
+            '<figure><img src="hand_closeup.png" alt="hand closeup"><figcaption>静置手型多角特写（正面/掌侧/手背/3/4）</figcaption></figure>'
+            '</div></section>'
+        )
     if (OUT / "turntable_sheet.png").exists():
         extras_html += (
             '<section><h2>转台</h2><figure><img src="turntable_sheet.png" alt="turntable">'
@@ -489,6 +551,7 @@ def main() -> None:
     head_objects = [obj for obj in bpy.context.scene.objects if obj.type == "MESH" and obj.name in {"Face", "Hair001", "CatEarR", "CatEarL", "CatEarInnerR", "CatEarInnerL", "Ahoge", "Headband", "HeadbandSideL", "HeadbandSideR", "HeadbandAccentL", "HeadbandAccentR"}]
     set_head_camera(camera, head_objects)
     render_still(camera, scene, OUT / "head_closeup.png", 1024, 1024)
+    render_phase14_closeups(camera, scene, center)
 
     make_comparison(REFERENCE / "three-view.jpg", (0.0, 0.333), OUT / "model_side.png", OUT / "compare_side.png")
     make_comparison(REFERENCE / "three-view.jpg", (0.333, 0.666), OUT / "model_front.png", OUT / "compare_front.png")
