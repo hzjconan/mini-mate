@@ -61,9 +61,9 @@
 | 所选模型与许可 | VRoid_V110_Female_v1.1.3.vrm（hinzka/52blendshapes-for-VRoid-face） | 个人与商用均可、可再分发、免署名；52 个 ARKit 名称全部落在 `Face` 网格。详见 `Assets/avatar/README.md` |
 | V10 形态键保留 | 52/52（macOS 运行时探针 + 真机逐项置 1） | 124 个形态键含 52 个 ARKit 名称（零缺失）；写 `jawOpen=0.75` 读回一致。2026-11-25 真机逐项验证（`-freezeIdle -blendName`，每次只置 1 个系数、截图与冻结待机基线对比）：52/52 均有可见变化，无缺失项；`mouthDimple*`、`mouthFrown*`、`mouthPress*`、`cheekSquint*`、`eyeLook*` 较弱但可辨 |
 | V10 动作片段 | 8/8（真机逐个点播，2026-11-25） | auto-build 一条时间线 + `actions.json`，8 个片段完整播放并回到待机（循环预览逐帧核对）；`spin` 采样残缺已修复；`shyCover` 最终姿势见 3862e50 |
-| V10 骨骼驱动 | 真机显示正常（2026-11-24） | 关节不是实体，头部朝向只能用 additive 关节动画；动画必须携带整条骨架的关节名与 rest pose 数组，只给单个关节会让 RealityKit 把增量套到根关节、整个模型位移约 1.5 m。已修复并真机截图验证 |
+| V10 骨骼驱动 | 真机显示正常（2026-11-24；2026-11-25 改为 `jointTransforms` 直驱） | 初期用 `FromToByAnimation` 驱动头部与动作 `SampledAnimation` 切换时出现跨类型混合闪烁（`FromToByAnimation` 未动画化平移/缩放，而动作含完整变换）；2026-11-25 确认 `Armature` 实为 `ModelEntity`（118 关节与 rest pose 一致），改用 `ModelEntity.jointTransforms` + 60 Hz 指数平滑直驱脖子（35%）与头部（65%），静态切入动作改用 `transitionDuration: 0`，真机确认姿态切换零闪烁 |
 | 材质效果 | PBR 与 Blender MToon 有差异（真机已调优） | 原灯光 5000 会把浅色衣服/头发洗白；改为 2000 + 浅色背景后接近 `renders/phase1/review.html`。调色板的衣服渐变上下只差 ~9 级，PBR 光照下被压平；auto-build 已把 `hoodie_gradient.png` 的对比拉开（上提亮、下压暗），真机可见上浅下深。USDZ 的 PBR 无法完全复现 MToon 高光/描边 |
-| SC-002 M_track p50/p90 | 待填 | |
+| SC-002 M_track p50/p90 | 真机 US2 验收通过（2026-11-25）；p50/p90 数值待补填 | 真机（iPhone 16 Pro Max）验证 Idle ↔ Attending、视线与头部平滑跟随、离开 >3 s 回 Idle 触发 `lookAround`、重现触发 `notice`、快速靠近（阈值实调为 1 s 内 >10 cm）触发 `leanBack`，且姿态切换无闪烁；`M_track` 精确 p50/p90 毫秒数待从调试面板抄录补齐 |
 | SC-003 M_reflex 区间命中率 | 待填 | |
 | SC-004 相关系数 | 待填 | |
 | SC-005 手势准确率 / 误触发 | 待填 | |

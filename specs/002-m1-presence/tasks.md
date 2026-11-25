@@ -65,19 +65,19 @@ description: "M1 感知与形象的任务列表"
 
 ### Tests（先写）
 
-- [ ] T020 [P] [US2] `Kit/Tests/MMPerceptionTests/OneEuroFilterTests.swift`：静止输入收敛、阶跃响应延迟上限、参数边界
-- [ ] T021 [P] [US2] `Kit/Tests/MMPerceptionTests/LookingAtScreenTests.swift`：夹角阈值、最短持续 200 ms、人脸丢失
-- [ ] T022 [P] [US2] `Kit/Tests/MMEmotionTests/AttentionTransitionTests.swift`：Idle ↔ Attending、丢失 3 s 回 Idle、回来触发 `notice`、快速靠近触发 `leanBack`（假时钟）
+- [x] T020 [P] [US2] `Kit/Tests/MMPerceptionTests/OneEuroFilterTests.swift`：静止输入收敛、阶跃响应延迟上限、参数边界
+- [x] T021 [P] [US2] `Kit/Tests/MMPerceptionTests/LookingAtScreenTests.swift`：夹角阈值、最短持续 200 ms、人脸丢失
+- [x] T022 [P] [US2] `Kit/Tests/MMEmotionTests/AttentionTransitionTests.swift`：Idle ↔ Attending、丢失 3 s 回 Idle、回来触发 `notice`、快速靠近触发 `leanBack`（假时钟）
 
 ### Implementation
 
-- [ ] T023 [P] [US2] `Kit/Sources/MMPerception/OneEuroFilter.swift`
-- [ ] T024 [US2] `Kit/Sources/MMPerception/ARKitPerceptionSource.swift`：独立 `ARSession`、delegate、人脸位置与 `isLookingAtScreen`、后台中断恢复（contracts/perception-source.md P-1、P-5、P-6）
-- [ ] T025 [P] [US2] `Kit/Sources/MMPerception/ScriptedPerceptionSource.swift`：JSON Lines 回放
-- [ ] T026 [US2] `Kit/Sources/MMEmotion/RuleBasedEmotionStateMachine.swift`：Idle / Attending 转换、视线目标计算、姿态合成第 1、5、6 步（contracts/emotion-state-machine.md）
-- [ ] T027 [US2] `AvatarScreen` 接入：感知 → 状态机 → 渲染；记录 M_track（用户脸位置变化 → 形象头部朝向变化的时间差）
-- [ ] T028 [US2] 调试面板增加"录制感知"导出 JSON Lines，"指标"页显示 p50/p90
-- [ ] T029 [US2] 真机执行 quickstart 第二节，记录 SC-002
+- [x] T023 [P] [US2] `Kit/Sources/MMPerception/OneEuroFilter.swift`
+- [x] T024 [US2] `Kit/Sources/MMPerception/ARKitPerceptionSource.swift`：独立 `ARSession`、delegate、人脸位置与 `isLookingAtScreen`、后台中断恢复（contracts/perception-source.md P-1、P-5、P-6）
+- [x] T025 [P] [US2] `Kit/Sources/MMPerception/ScriptedPerceptionSource.swift`：JSON Lines 回放
+- [x] T026 [US2] `Kit/Sources/MMEmotion/RuleBasedEmotionStateMachine.swift`：Idle / Attending 转换、视线目标计算、姿态合成第 1、5、6 步（contracts/emotion-state-machine.md）
+- [x] T027 [US2] `AvatarScreen` 接入：感知 → 状态机 → 渲染；记录 M_track（用户脸位置变化 → 形象头部朝向变化的时间差）
+- [x] T028 [US2] 调试面板增加"录制感知"导出 JSON Lines，"指标"页显示 p50/p90
+- [x] T029 [US2] 真机执行 quickstart 第二节，记录 SC-002（2026-11-25 真机验收通过，姿态切换闪烁已修复）
 
 **Checkpoint**：SC-002 达成，主观"它在看我"
 
