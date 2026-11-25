@@ -4,21 +4,41 @@ import MMAvatar
 
 /// 调试面板：52 个表情系数滑杆 + 动作点播。
 struct AvatarDebugPanel: View {
-    let scene: PlaceholderAvatarScene
+    let scene: AvatarScene
 
     var body: some View {
         List {
-            Section {
-                Text("当前为占位形象，只有 jawOpen 会改变嘴部；其余系数等真实模型接入后生效。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
             Section("动作") {
+                Toggle(
+                    "循环播放（回形象页持续观察）",
+                    isOn: Binding(
+                        get: { scene.loopsPreviewAction },
+                        set: { value in
+                            scene.loopsPreviewAction = value
+                            if !value {
+                                scene.stopPreview()
+                            }
+                        }
+                    )
+                )
+
+                Picker(
+                    "播放速度",
+                    selection: Binding(
+                        get: { Double(scene.previewSpeed) },
+                        set: { scene.setPreviewSpeed(Float($0)) }
+                    )
+                ) {
+                    Text("1×").tag(1.0)
+                    Text("0.5×").tag(0.5)
+                    Text("0.25×").tag(0.25)
+                }
+                .pickerStyle(.segmented)
+
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 96))], spacing: 8) {
                     ForEach(ActionTag.allCases, id: \.self) { tag in
                         Button(tag.rawValue) {
-                            scene.play(tag)
+                            scene.preview(tag, loop: scene.loopsPreviewAction)
                         }
                         .buttonStyle(.bordered)
                         .frame(maxWidth: .infinity)
@@ -30,6 +50,10 @@ struct AvatarDebugPanel: View {
                     Text("播放中：\(playing.rawValue)")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+
+                Button("停止动作", role: .destructive) {
+                    scene.stopPreview()
                 }
             }
 

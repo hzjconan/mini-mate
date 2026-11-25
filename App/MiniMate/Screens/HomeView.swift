@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct HomeView: View {
@@ -5,6 +6,21 @@ struct HomeView: View {
     @AppStorage("resignCheckCounter") private var counter = 0
 
     var body: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-showAvatar") {
+            // 调试入口：`devicectl ... launch <bundle> -showAvatar` 直达形象页。
+            NavigationStack {
+                AvatarScreen()
+            }
+        } else {
+            home
+        }
+        #else
+        home
+        #endif
+    }
+
+    private var home: some View {
         NavigationStack {
             VStack(spacing: 16) {
                 Text("小瓜")
@@ -18,7 +34,7 @@ struct HomeView: View {
                 Text("重签后此数值应保留")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                NavigationLink("形象（占位）") {
+                NavigationLink("形象") {
                     AvatarScreen()
                 }
                 .buttonStyle(.borderedProminent)

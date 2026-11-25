@@ -90,15 +90,28 @@ def main() -> None:
     if usdz_ok:
         from pxr import Usd, UsdSkel
 
+        manifest_path = USDZ.with_name(USDZ.stem + ".actions.json")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+        check("动作清单存在", manifest is not None, str(manifest_path))
+        if manifest is not None:
+            check(
+                "清单 8 个片段",
+                manifest.get("version") == 1
+                and set(manifest.get("clips", {})) == set(ACTION_NAMES),
+                f"clips={sorted(manifest.get('clips', {}))}",
+            )
+
         stage = Usd.Stage.Open(str(USDZ))
         animations = []
+        animation_source: list = []
         blend_shape_names: set[str] = set()
         skeleton_names: set[str] = set()
         for prim in stage.Traverse():
             if prim.GetTypeName() == "SkelAnimation":
-                animations.append(prim.GetName())
+                animations.append(prim)
             if prim.GetTypeName() == "Skeleton":
                 skeleton_names.add(prim.GetName())
+                animation_source = prim.GetRelationship("skel:animationSource").GetTargets()
             if prim.GetTypeName() == "Mesh":
                 api = UsdSkel.BindingAPI(prim)
                 targets = api.GetBlendShapeTargetsRel()
@@ -106,7 +119,32 @@ def main() -> None:
                     target = stage.GetPrimAtPath(target_path)
                     if target:
                         blend_shape_names.add(target.GetName())
-        check("USDZ 8 条动作", len(animations) == len(ACTION_NAMES) and set(animations) == set(ACTION_NAMES), f"animations={sorted(animations)}")
+
+        timeline = animations[0] if len(animations) == 1 else None
+        check(
+            "USDZ 单条动作时间线",
+            timeline is not None and timeline.GetName() == "actions",
+            f"animations={[prim.GetName() for prim in animations]}",
+        )
+        check(
+            "USDZ 动作已绑定",
+            timeline is not None and animation_source == [timeline.GetPath()],
+            f"animationSource={animation_source}",
+        )
+        if timeline is not None and manifest is not None:
+            times = [int(round(t)) for t in timeline.GetAttribute("rotations").GetTimeSamples()]
+            total_frames = int(manifest["totalFrames"])
+            check(
+                "时间线逐帧连续",
+                times == list(range(1, total_frames + 1))
+                and int(round(stage.GetEndTimeCode())) == total_frames,
+                f"samples={len(times)} end={stage.GetEndTimeCode()} totalFrames={total_frames}",
+            )
+            blend_weights = timeline.GetAttribute("blendShapeWeights")
+            check(
+                "时间线不含形态键动画",
+                blend_weights is None or not blend_weights.GetTimeSamples(),
+            )
         missing_usdz = [name for name in expected if name not in blend_shape_names]
         check("USDZ ARKit 52 名称", not missing_usdz, f"missing={missing_usdz}")
         check("USDZ 骨架", bool(skeleton_names), f"skeletons={sorted(skeleton_names)}")

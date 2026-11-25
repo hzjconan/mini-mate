@@ -95,11 +95,18 @@ def lerp_color(a, b, t: float):
 
 
 def generate_textures() -> dict[str, Path]:
-    top = hex_rgb(PALETTE["hoodieTop"])
-    bottom = hex_rgb(PALETTE["hoodieBottom"])
+    # 调色板原始上下差只有 ~9 级，PBR 光照下几乎看不出渐变；保持色相，
+    # 顶部提亮、底部压暗并略微加深蓝色，让真机上能看到 review 的上浅下深。
+    top = tuple(min(1.0, c * 1.06) for c in hex_rgb(PALETTE["hoodieTop"]))
+    base_bottom = hex_rgb(PALETTE["hoodieBottom"])
+    bottom = (
+        base_bottom[0] * 0.86,
+        base_bottom[1] * 0.90,
+        min(1.0, base_bottom[2] * 0.96),
+    )
 
     def hoodie_pixel(_u, v):
-        t = smoothstep((v - 0.38) / 0.28)
+        t = smoothstep((v - 0.15) / 0.7)
         color = lerp_color(bottom, top, t)
         return tuple(round(c * 255) for c in color)
 
@@ -132,12 +139,11 @@ def generate_textures() -> dict[str, Path]:
 
     solids = {
         "shorts": PALETTE["shorts"],
-        "trim": "#FCFDFF",
+        "trim": "#FFFFFF",
         "rib": "#E9EEF7",
         "seam": "#93A5C6",
         "hoodfold": "#B9C7DE",
         "headbandtop": "#CBDDF3",
-        "tip": "#DCE6F4",
     }
     paths = {"hoodie": hoodie_path, "ear": ear_path, "neck": neck_path}
     for name, hex_value in solids.items():
@@ -182,6 +188,35 @@ def clone_mtoon(source, name: str, image):
     material = source.copy()
     material.name = name
     replace_mtoon_images(material, image)
+    return material
+
+
+def make_emissive_color_material(name: str, color, intensity: float = 1.0):
+    """Unlit-looking material with a constant emissive colour.
+
+    USD has no emission-strength input; write the intensity into the colour so
+    the exporter keeps it (values above 1 are valid HDR in UsdPreviewSurface).
+    """
+    material = bpy.data.materials.get(name)
+    if material:
+        bpy.data.materials.remove(material)
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    material.node_tree.nodes.clear()
+    output = material.node_tree.nodes.new("ShaderNodeOutputMaterial")
+    bsdf = material.node_tree.nodes.new("ShaderNodeBsdfPrincipled")
+    bsdf.inputs["Base Color"].default_value = (0.0, 0.0, 0.0, 1.0)
+    bsdf.inputs["Emission Color"].default_value = (
+        color[0] * intensity,
+        color[1] * intensity,
+        color[2] * intensity,
+        1.0,
+    )
+    bsdf.inputs["Emission Strength"].default_value = 1.0
+    bsdf.inputs["Roughness"].default_value = 1.0
+    if "Specular IOR Level" in bsdf.inputs:
+        bsdf.inputs["Specular IOR Level"].default_value = 0.0
+    material.node_tree.links.new(bsdf.outputs["BSDF"], output.inputs["Surface"])
     return material
 
 
@@ -848,6 +883,8 @@ def add_shorts_hem_bands(armature, body, material, nearest):
 
 
 def add_socks(armature, body, nearest, material):
+    from mathutils.bvhtree import BVHTree
+
     skin_indices = {
         vertex_index
         for polygon in body.data.polygons
@@ -856,34 +893,93 @@ def add_socks(armature, body, nearest, material):
     }
     skin_world = [(body.matrix_world @ body.data.vertices[index].co, index) for index in skin_indices]
 
-    z_levels = [SOCK_BOTTOM_Z, 0.090, 0.112, 0.138, 0.162, SOCK_TOP_Z]
+    # Raycast only the skin: the shoe lives in the same mesh, and the sock must
+    # follow the ankle/foot surface inside the shoe instead of the shoe shell.
+    skin_vertices: list[Vector] = []
+    skin_faces: list[list[int]] = []
+    skin_index_map: dict[int, int] = {}
+    for polygon in body.data.polygons:
+        if polygon.material_index != 0:
+            continue
+        face = []
+        for vertex_index in polygon.vertices:
+            local = skin_index_map.get(vertex_index)
+            if local is None:
+                local = len(skin_vertices)
+                skin_index_map[vertex_index] = local
+                skin_vertices.append(body.matrix_world @ body.data.vertices[vertex_index].co)
+            face.append(local)
+        skin_faces.append(face)
+    skin_bvh = BVHTree.FromPolygons(skin_vertices, skin_faces, all_triangles=False)
+
+    # A normal sock tucks into the shoe and has a snug cuff, not a floating
+    # open-ended tube.  The lowest rings run below the shoe top (z≈0.066) so no
+    # ankle skin shows between sock and shoe; the top ring is pulled inside the
+    # skin so the sock ends in a cuff instead of an open rim.
     segments = 20
+    shoe_collar_z = SOCK_BOTTOM_Z
+    levels = [
+        # The shoe collar is wider than the ankle; a small outward flare at the
+        # opening keeps skin from showing between the sock and the shoe.
+        (0.048, 0.0060),
+        (0.060, 0.0055),
+        (shoe_collar_z, 0.0050),
+        (0.090, 0.0025),
+        (0.112, 0.0025),
+        (0.138, 0.0025),
+        (0.158, 0.0025),
+        # Rounded cuff: a short rolled lip that tucks back into the skin.
+        (0.164, 0.0040),
+        (0.170, 0.0055),
+        (0.175, 0.0060),
+        (0.179, 0.0055),
+        (SOCK_TOP_Z + 0.0015, 0.0035),
+        (SOCK_TOP_Z + 0.0030, 0.0003),
+        (SOCK_TOP_Z + 0.0035, -0.0020),
+    ]
+
+    def ring_center(z: float, sign: int) -> Vector | None:
+        window = 0.018 if z >= shoe_collar_z else 0.006
+        slice_points = [
+            point
+            for point, _index in skin_world
+            if abs(point.z - z) < window and point.x * sign > 0.01
+        ]
+        if len(slice_points) < 4:
+            return None
+        return sum(slice_points, Vector()) / len(slice_points)
+
+    def ray_ring(center: Vector, z: float, sign: int) -> list[tuple[Vector, Vector]]:
+        ring = []
+        misses = 0
+        for segment in range(segments):
+            angle = 2.0 * math.pi * segment / segments
+            direction = Vector((math.cos(angle), math.sin(angle), 0.0))
+            hit, _normal, _index, _distance = skin_bvh.ray_cast(
+                Vector((center.x, center.y, z)), direction, 0.16
+            )
+            if hit is None:
+                misses += 1
+                hit = Vector((center.x, center.y, z)) + direction * 0.045
+            radial = Vector((hit.x - center.x, hit.y - center.y, 0.0))
+            if radial.length < 1e-5:
+                radial = direction
+            ring.append((hit, radial.normalized()))
+        if misses:
+            print(f"SOCK_RAY {sign} z={z:.3f} misses={misses}")
+        return ring
+
     for sign, side in ((1, "L"), (-1, "R")):
         rings = []
-        for index, z in enumerate(z_levels):
-            slice_points = [
-                point
-                for point, _index in skin_world
-                if abs(point.z - z) < 0.018 and point.x * sign > 0.01
-            ]
-            if len(slice_points) < 4:
+        for z, offset in levels:
+            center = ring_center(z, sign)
+            if center is None:
+                print(f"SOCK_RING {side} z={z:.3f} skipped=no slice")
                 continue
-            center = sum(slice_points, Vector()) / len(slice_points)
-            ring = []
-            misses = 0
-            for segment in range(segments):
-                angle = 2.0 * math.pi * segment / segments
-                direction = Vector((math.cos(angle), math.sin(angle), 0.0))
-                hit = body_ray_hit(body, Vector((center.x, center.y, z)), direction, distance=0.16)
-                if hit is None:
-                    misses += 1
-                    hit = Vector((center.x, center.y, z)) + direction * 0.045
-                radial = Vector((hit.x - center.x, hit.y - center.y, 0.0))
-                if radial.length < 1e-5:
-                    radial = direction
-                ring.append(hit + radial.normalized() * 0.004)
-            rings.append(ring)
-            print(f"SOCK_RING {side} z={z:.3f} center=({center.x:.3f},{center.y:.3f}) misses={misses}")
+            hits = ray_ring(center, z, sign)
+            rings.append([hit + normal * offset for hit, normal in hits])
+            print(f"SOCK_RING {side} z={z:.3f} center=({center.x:.3f},{center.y:.3f}) offset={offset:.4f}")
+
         if len(rings) < 3:
             print(f"SOCK_{side}_SKIPPED rings={len(rings)}")
             continue
@@ -1530,7 +1626,6 @@ def main() -> None:
     hoodfold_image = load_image("SolidHoodFoldTex", texture_paths["hoodfold"])
     neck_image = load_image("NeckSkinTex", texture_paths["neck"])
     headbandtop_image = load_image("HeadbandTopTex", texture_paths["headbandtop"])
-    tip_image = load_image("SolidTipTex", texture_paths["tip"])
     ear_image = load_image("EarInnerGradientTex", texture_paths["ear"])
 
     # Keep the VRM MToon shading (the approved look) and only swap the colour
@@ -1548,8 +1643,11 @@ def main() -> None:
     body_skin_material = bpy.data.materials.get("N00_000_00_Body_00_SKIN", tops_material)
     neck_skin_material = clone_mtoon(body_skin_material, "NeckSkin", neck_image)
     headbandtop_material = clone_mtoon(tops_material, "HeadbandTop", headbandtop_image)
-    tip_material = clone_mtoon(tops_material, "DrawstringTip", tip_image)
-    string_material = trim_material
+    # The drawstrings read as grey-blue under the scene light when they share
+    # the hoodie's PBR material.  A pure white emissive material keeps them
+    # white; emission is raised to 2.5x so tone mapping still resolves them as
+    # white against the hoodie (plain emission 1.0 lands near the hoodie grey).
+    string_material = make_emissive_color_material("DrawstringWhite", (1.0, 1.0, 1.0), intensity=2.5)
     ear_material = make_emissive_textured_material("EarInnerGradient", ear_image, strength=1.0)
 
     cut_shorts(armature, body)
@@ -1569,7 +1667,7 @@ def main() -> None:
     add_v_neck(armature, body, neck_skin_material, hoodie_material, nearest)
     add_collar(armature, hoodie_material)
     add_hood(armature, hoodie_material, hoodfold_material, rib_material)
-    add_drawstrings(armature, body, string_material, tip_material)
+    add_drawstrings(armature, body, string_material, string_material)
     rebuild_cat_ears(armature, headbandtop_material)
     upgrade_ear_inner(ear_material)
 
