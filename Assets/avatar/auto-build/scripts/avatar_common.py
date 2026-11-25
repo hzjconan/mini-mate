@@ -157,9 +157,11 @@ def make_actions(armature, fps: int = 30) -> dict[str, int]:
     # 害羞遮嘴（经典手势）：手背朝镜头、手指朝上，掌侧轻贴嘴前；手腕落在
     # 下巴下方，袖口远离嘴。手臂/手腕四元数由 IK + 世界轴滚转烘焙。
     shy_pose = {
-        "J_Bip_R_UpperArm": Quaternion((0.835787, 0.080820, -0.389347, 0.378599)),
-        "J_Bip_R_LowerArm": Quaternion((0.678676, 0.119557, 0.0, 0.724642)),
-        "J_Bip_R_Hand": Quaternion((0.771843, 0.065978, 0.340877, 0.532643)),
+        # Phase 1 腕部 IK 目标 (-0.073, -0.171, 0.755) m，肘部向外展开，
+        # 前臂承担 55° 翻掌，手指斜过嘴前，从拇指与食指之间露出一点嘴唇。
+        "J_Bip_R_UpperArm": Quaternion((0.834504, 0.208979, -0.372242, 0.348378)),
+        "J_Bip_R_LowerArm": Quaternion((0.707279, -0.187802, 0.368186, 0.573520)),
+        "J_Bip_R_Hand": Quaternion((0.910562, -0.202731, -0.044672, 0.357466)),
     }
     # 五指并拢、略微收拢（局部 X 负向朝掌心），指尖朝上。
     for _prefix in ("Index", "Middle", "Ring", "Little"):
@@ -308,7 +310,7 @@ def make_actions(armature, fps: int = 30) -> dict[str, int]:
             (1.20, {head: (0, 0, 0), **heart_pose_rest}),
             (1.4, {head: (0, 0, 0), **heart_pose_rest}),
         ],
-        # 害羞遮脸：双手抬到嘴前，掌心朝向脸，头略低并侧倾。
+        # 右手抬到嘴前，头略低并侧倾。
         "shyCover": [
             (0.0, {head: (0, 0, 0), **shy_pose_rest}),
             (0.30, {head: (0.15, -0.04, 0), **shy_pose}),
