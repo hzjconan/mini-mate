@@ -42,6 +42,8 @@ final class AvatarScene {
     @ObservationIgnored private var debugPoseTag: ActionTag?
     @ObservationIgnored private var debugPoseFraction: Double = 0.5
     @ObservationIgnored private var debugPreviewTag: ActionTag?
+    /// 真机逐个验证形态键时冻结呼吸/眨眼，避免截图差异混入待机动作。
+    @ObservationIgnored private var debugFreezeIdle = false
     #endif
 
     init() {
@@ -77,6 +79,12 @@ final class AvatarScene {
         if let index = arguments.firstIndex(of: "-previewAction"),
            index + 1 < arguments.count {
             debugPreviewTag = ActionTag(rawValue: arguments[index + 1])
+        }
+        // 真机逐项验收 52 个形态键：一个进程只置一个系数为 1。
+        debugFreezeIdle = arguments.contains("-freezeIdle")
+        if let index = arguments.firstIndex(of: "-blendName"),
+           index + 1 < arguments.count {
+            debugWeights[arguments[index + 1]] = 1
         }
         renderer.debugDisableHeadPose = debugDisableHeadPose
         #endif
@@ -182,7 +190,11 @@ final class AvatarScene {
     private func tick() {
         // 加载完成前 `renderer` 还没有形态键映射，提前驱动会误报全部 blendShape 缺失。
         guard capabilities != nil else { return }
+        #if DEBUG
+        let motion = debugFreezeIdle ? IdleMotion() : idle.updateNow()
+        #else
         let motion = idle.updateNow()
+        #endif
 
         var weights: [String: Float] = [:]
         for name in BlendShapeIndex.arkitNames {

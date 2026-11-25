@@ -51,7 +51,7 @@ description: "M1 感知与形象的任务列表"
 - [x] T016 [US1] `Kit/Sources/MMAvatar/IdleMotionLayer.swift`：呼吸与眨眼（可注入时钟与随机源）
 - [x] T017 [US1] `App/MiniMate/Screens/AvatarScreen.swift`：`RealityView` + 固定虚拟相机 + 每帧驱动（当前为占位形象）
 - [x] T018 [US1] `App/MiniMate/Screens/Debug/AvatarDebugPanel.swift`：52 个滑杆、动作点播（当前为占位形象）
-- [ ] T019 [US1] 真机执行 quickstart 第一节，结果写入 `research.md`；若 V10 失败，停止后续任务并评估自建模型或 Live2D，修订 plan
+- [x] T019 [US1] 真机执行 quickstart 第一节，结果写入 `research.md`；若 V10 失败，停止后续任务并评估自建模型或 Live2D，修订 plan（52/52 形态键与 8/8 动作真机验证通过，2026-11-25）
 
 **Checkpoint**：SC-001 达成
 

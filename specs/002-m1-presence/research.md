@@ -58,9 +58,9 @@
 
 | 项 | 结果 | 备注 |
 |---|---|---|
-| 所选模型与许可 | 待填 | |
-| V10 形态键保留 | 52/52（macOS RealityKit 运行时探针） | 124 个形态键含 52 个 ARKit 名称（零缺失）；写 `jawOpen=0.75` 读回一致 |
-| V10 动作片段 | 8/8 可从单条时间线裁出（macOS RealityKit 探针） | auto-build 已改为一条绑定时间线 + `actions.json`；8 个片段时长与清单一致、离屏渲染均有骨骼位移；`spin` 采样残缺已一并修复。App 侧真机点播待验收 |
+| 所选模型与许可 | VRoid_V110_Female_v1.1.3.vrm（hinzka/52blendshapes-for-VRoid-face） | 个人与商用均可、可再分发、免署名；52 个 ARKit 名称全部落在 `Face` 网格。详见 `Assets/avatar/README.md` |
+| V10 形态键保留 | 52/52（macOS 运行时探针 + 真机逐项置 1） | 124 个形态键含 52 个 ARKit 名称（零缺失）；写 `jawOpen=0.75` 读回一致。2026-11-25 真机逐项验证（`-freezeIdle -blendName`，每次只置 1 个系数、截图与冻结待机基线对比）：52/52 均有可见变化，无缺失项；`mouthDimple*`、`mouthFrown*`、`mouthPress*`、`cheekSquint*`、`eyeLook*` 较弱但可辨 |
+| V10 动作片段 | 8/8（真机逐个点播，2026-11-25） | auto-build 一条时间线 + `actions.json`，8 个片段完整播放并回到待机（循环预览逐帧核对）；`spin` 采样残缺已修复；`shyCover` 最终姿势见 3862e50 |
 | V10 骨骼驱动 | 真机显示正常（2026-11-24） | 关节不是实体，头部朝向只能用 additive 关节动画；动画必须携带整条骨架的关节名与 rest pose 数组，只给单个关节会让 RealityKit 把增量套到根关节、整个模型位移约 1.5 m。已修复并真机截图验证 |
 | 材质效果 | PBR 与 Blender MToon 有差异（真机已调优） | 原灯光 5000 会把浅色衣服/头发洗白；改为 2000 + 浅色背景后接近 `renders/phase1/review.html`。调色板的衣服渐变上下只差 ~9 级，PBR 光照下被压平；auto-build 已把 `hoodie_gradient.png` 的对比拉开（上提亮、下压暗），真机可见上浅下深。USDZ 的 PBR 无法完全复现 MToon 高光/描边 |
 | SC-002 M_track p50/p90 | 待填 | |
