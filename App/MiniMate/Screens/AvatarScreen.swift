@@ -5,12 +5,15 @@ import SwiftUI
 import MMCore
 import MMAvatar
 import MMEmotion
+import MMPerception
 
-/// 形象场景：持有渲染器与正面相机，按帧把待机层与调试面板的系数合成 `AvatarPose` 后交给渲染器。
+/// 形象场景：持有渲染器、正面相机、感知源与情绪状态机，按帧把姿态合成后交给渲染器。
 @MainActor
 @Observable
 final class AvatarScene {
-    /// 调试面板写入；每帧会补齐 52 个名称，未设置的按 0 处理。
+    private static let maxRecordedFrames = 10_800
+
+    /// 调试面板写入；非零项覆盖状态机对应权重。
     var debugWeights: [String: Float] = [:]
     private(set) var playingAction: ActionTag?
     private(set) var loadError: String?
@@ -22,13 +25,46 @@ final class AvatarScene {
     /// 调试预览速度，1 为正常速度。
     var previewSpeed: Float = 1.0
 
+    // MARK: - 感知、状态机与指标可观察状态
+
+    private(set) var currentStateKind: AvatarStateKind = .idle
+    private(set) var isFaceTracked: Bool = false
+    private(set) var isLookingAtScreen: Bool = false
+    private(set) var latestFacePosition: SIMD3<Float>?
+    private(set) var latestHeadRotation: SIMD3<Float> = .zero
+    private(set) var latestEyeTarget: SIMD2<Float> = .zero
+    private(set) var perceptionErrorMessage: String?
+
+    private(set) var isRecordingPerception: Bool = false
+    private(set) var recordedFrameCount: Int = 0
+    private(set) var lastRecordedJSONLines: String?
+    private(set) var latencyRecorder = LatencyRecorder()
+
     let root: Entity
     /// `RealityView` 的非 AR 虚拟相机：加入场景时采用这台 `PerspectiveCamera` 的变换。
     let camera = PerspectiveCamera()
 
     @ObservationIgnored private let renderer: RealityKitAvatarRenderer
-    @ObservationIgnored private var idle = IdleMotionLayer()
+    @ObservationIgnored private var clock: any MMCore.Clock
+    @ObservationIgnored private var perceptionSource: (any PerceptionSource)?
+    @ObservationIgnored private var stateMachine: any EmotionStateMachine
+    @ObservationIgnored private var isConfiguredFromComposition = false
+
     @ObservationIgnored private var subscription: EventSubscription?
+    @ObservationIgnored private var perceptionTask: Task<Void, Never>?
+    @ObservationIgnored private var isStartingPerception = false
+    @ObservationIgnored private var perceptionGeneration: UInt64 = 0
+    @ObservationIgnored private var poseTask: Task<Void, Never>?
+    @ObservationIgnored private var latestPose = AvatarPose()
+    @ObservationIgnored private var pendingStateMachineAction: ActionCommand?
+    @ObservationIgnored private var trackLatencyTracker = TrackLatencyTracker()
+    @ObservationIgnored private var recordedFrames: [PerceptionFeatures] = []
+    @ObservationIgnored private var isDebugPanelPresented = false
+
+    private var canMeasureTrackLatency: Bool {
+        currentStateKind == .attending && playingAction == nil && !isDebugPanelPresented
+    }
+
     @ObservationIgnored private var pendingAction: ActionTag?
     @ObservationIgnored private var pendingStopAction = false
     /// 害羞遮嘴时眼睛的闭合/眯眼混合量，随动作平滑进入和退出。
@@ -42,14 +78,21 @@ final class AvatarScene {
     @ObservationIgnored private var debugPoseTag: ActionTag?
     @ObservationIgnored private var debugPoseFraction: Double = 0.5
     @ObservationIgnored private var debugPreviewTag: ActionTag?
-    /// 真机逐个验证形态键时冻结呼吸/眨眼，避免截图差异混入待机动作。
+    /// 真机逐个验证形态键时冻结呼吸/眨眼与自动感知驱动，避免截图差异混入待机动作。
     @ObservationIgnored private var debugFreezeIdle = false
     #endif
 
-    init() {
+    init(
+        clock: any MMCore.Clock = SystemClock(),
+        perceptionSource: (any PerceptionSource)? = nil,
+        stateMachine: (any EmotionStateMachine)? = nil
+    ) {
         let renderer = RealityKitAvatarRenderer()
         self.renderer = renderer
         self.root = renderer.root
+        self.clock = clock
+        self.perceptionSource = perceptionSource
+        self.stateMachine = stateMachine ?? RuleBasedEmotionStateMachine(clock: clock)
 
         var intensity: Float = 2000
         var fillIntensity: Float = 900
@@ -109,6 +152,16 @@ final class AvatarScene {
         camera.camera.far = 100
     }
 
+    func configure(from composition: AppComposition) {
+        guard !isConfiguredFromComposition else { return }
+        isConfiguredFromComposition = true
+        self.clock = composition.clock
+        if self.perceptionSource == nil {
+            self.perceptionSource = composition.makePerceptionSource()
+        }
+        self.stateMachine = composition.makeEmotionStateMachine()
+    }
+
     func load() async {
         do {
             capabilities = try await renderer.load(named: "minimate")
@@ -128,6 +181,177 @@ final class AvatarScene {
         } catch {
             loadError = "形象加载失败：\(error)"
         }
+    }
+
+    // MARK: - 感知生命周期
+
+    func startPerception() async {
+        #if DEBUG
+        if debugFreezeIdle { return }
+        #endif
+        guard perceptionTask == nil, !isStartingPerception else { return }
+        guard let source = perceptionSource else { return }
+
+        isStartingPerception = true
+        perceptionGeneration &+= 1
+        let generation = perceptionGeneration
+        defer {
+            if perceptionGeneration == generation {
+                isStartingPerception = false
+            }
+        }
+
+        perceptionErrorMessage = nil
+        let stream = source.features
+        do {
+            try await source.start()
+        } catch let error as PerceptionError {
+            guard perceptionGeneration == generation else { return }
+            switch error {
+            case .cameraPermissionDenied:
+                perceptionErrorMessage = "未获得摄像头权限，请在系统设置中开启以启用视线跟随（形象仍可正常待机）。"
+            case .faceTrackingUnsupported:
+                perceptionErrorMessage = "当前设备不支持前置人脸追踪（形象仍可正常待机）。"
+            case .sessionInterrupted:
+                perceptionErrorMessage = "摄像头会话暂时中断，恢复后将自动继续。"
+            }
+            return
+        } catch {
+            guard perceptionGeneration == generation else { return }
+            perceptionErrorMessage = "感知启动失败：\(error.localizedDescription)"
+            return
+        }
+
+        // 启动挂起期间若已离页或被 stopPerception()，立刻关闭摄像头防泄漏
+        guard !Task.isCancelled, perceptionGeneration == generation else {
+            source.stop()
+            return
+        }
+
+        perceptionTask = Task { [weak self] in
+            for await features in stream {
+                guard let self, !Task.isCancelled, self.perceptionGeneration == generation else { break }
+                self.handleIncomingFeatures(features)
+                await self.stateMachine.handle(features)
+                // 收到感知帧后立即同步求值最新姿态，消除额外 1~2 帧 actor hop 延迟并保持调试面板实时刷新
+                guard !Task.isCancelled, self.perceptionGeneration == generation else { break }
+                let evalTime = self.clock.now.timeIntervalSinceReferenceDate
+                let pose = await self.stateMachine.pose(at: evalTime)
+                let state = await self.stateMachine.state
+                guard !Task.isCancelled, self.perceptionGeneration == generation else { break }
+                self.latestPose = pose
+                self.currentStateKind = state.kind
+                self.latestHeadRotation = pose.headRotation
+                self.latestEyeTarget = pose.eyeTarget
+                if let cmd = pose.action {
+                    self.pendingStateMachineAction = cmd
+                }
+            }
+        }
+    }
+
+    func stopPerception() {
+        perceptionGeneration &+= 1
+        isStartingPerception = false
+        perceptionTask?.cancel()
+        perceptionTask = nil
+        perceptionSource?.stop()
+        poseTask?.cancel()
+        poseTask = nil
+        isFaceTracked = false
+        isLookingAtScreen = false
+        latestFacePosition = nil
+        trackLatencyTracker.reset()
+    }
+
+    func handleBackground() async {
+        poseTask?.cancel()
+        poseTask = nil
+        let now = clock.now.timeIntervalSinceReferenceDate
+        if let ruleBased = stateMachine as? RuleBasedEmotionStateMachine {
+            await ruleBased.resetToIdle(at: now)
+        }
+        currentStateKind = .idle
+        isFaceTracked = false
+        isLookingAtScreen = false
+        latestFacePosition = nil
+        latestHeadRotation = .zero
+        latestEyeTarget = .zero
+        latestPose = AvatarPose()
+        pendingStateMachineAction = nil
+        trackLatencyTracker.reset()
+    }
+
+    func setDebugPanelPresented(_ presented: Bool) {
+        isDebugPanelPresented = presented
+    }
+
+    func handleScreenDisappear() {
+        if !isDebugPanelPresented {
+            stopPerception()
+        }
+    }
+
+    private func handleIncomingFeatures(_ features: PerceptionFeatures) {
+        isFaceTracked = features.isFaceTracked
+        isLookingAtScreen = features.isLookingAtScreen
+        latestFacePosition = features.facePosition
+
+        if canMeasureTrackLatency {
+            trackLatencyTracker.observeFacePosition(
+                features.facePosition,
+                currentHeadRotation: latestHeadRotation,
+                at: features.timestamp
+            )
+        } else {
+            trackLatencyTracker.reset()
+        }
+
+        if isRecordingPerception {
+            recordedFrames.append(features)
+            recordedFrameCount = recordedFrames.count
+            if recordedFrames.count >= Self.maxRecordedFrames {
+                stopPerceptionRecording()
+            }
+        }
+    }
+
+    // MARK: - 感知录制与指标导出
+
+    func startPerceptionRecording() {
+        recordedFrames.removeAll(keepingCapacity: true)
+        recordedFrameCount = 0
+        lastRecordedJSONLines = nil
+        isRecordingPerception = true
+    }
+
+    func stopPerceptionRecording() {
+        guard isRecordingPerception else { return }
+        isRecordingPerception = false
+        guard !recordedFrames.isEmpty else {
+            lastRecordedJSONLines = nil
+            return
+        }
+        if let data = try? ScriptedPerceptionSource.encodeJSONLines(recordedFrames),
+           let text = String(data: data, encoding: .utf8) {
+            lastRecordedJSONLines = text
+        }
+    }
+
+    func clearPerceptionRecording() {
+        isRecordingPerception = false
+        recordedFrames.removeAll()
+        recordedFrameCount = 0
+        lastRecordedJSONLines = nil
+    }
+
+    func metricsCSV() -> String {
+        latencyRecorder.csv()
+    }
+
+    func clearMetrics() {
+        latencyRecorder = LatencyRecorder()
+        trackLatencyTracker.reset()
     }
 
     #if DEBUG
@@ -190,19 +414,40 @@ final class AvatarScene {
     private func tick() {
         // 加载完成前 `renderer` 还没有形态键映射，提前驱动会误报全部 blendShape 缺失。
         guard capabilities != nil else { return }
+
+        let now = clock.now.timeIntervalSinceReferenceDate
         #if DEBUG
-        let motion = debugFreezeIdle ? IdleMotion() : idle.updateNow()
+        let freezeIdle = debugFreezeIdle
         #else
-        let motion = idle.updateNow()
+        let freezeIdle = false
         #endif
 
-        var weights: [String: Float] = [:]
-        for name in BlendShapeIndex.arkitNames {
-            weights[name] = debugWeights[name] ?? 0
+        // 单飞行异步刷新状态机姿态，不在 60 Hz 回调里堆积并发 Task
+        if !freezeIdle, poseTask == nil {
+            poseTask = Task { [weak self] in
+                guard let self else { return }
+                let pose = await self.stateMachine.pose(at: now)
+                let state = await self.stateMachine.state
+                guard !Task.isCancelled else {
+                    self.poseTask = nil
+                    return
+                }
+                self.latestPose = pose
+                self.currentStateKind = state.kind
+                self.latestHeadRotation = pose.headRotation
+                self.latestEyeTarget = pose.eyeTarget
+                if let cmd = pose.action {
+                    self.pendingStateMachineAction = cmd
+                }
+                self.poseTask = nil
+            }
         }
-        // 待机眨眼叠加在表情之上，不会把滑杆调出的闭眼抹掉。
-        weights["eyeBlinkLeft"] = max(weights["eyeBlinkLeft"] ?? 0, motion.eyeBlink)
-        weights["eyeBlinkRight"] = max(weights["eyeBlinkRight"] ?? 0, motion.eyeBlink)
+
+        var weights: [String: Float] = freezeIdle ? [:] : latestPose.expressionWeights
+        // 调试滑杆非零项覆盖状态机权重，保留 T019 52 滑杆逐项测试与 -blendName 能力
+        for (name, value) in debugWeights where value > 0 {
+            weights[name] = value
+        }
 
         // shyCover：手遮嘴时眼睛微微闭上（眯眼 + 轻闭），动作结束后平滑恢复。
         let shyTarget: Float = (playingAction == .shyCover) ? 1 : 0
@@ -216,22 +461,44 @@ final class AvatarScene {
             weights["eyeSquintRight"] = max(weights["eyeSquintRight"] ?? 0, squint)
         }
 
+        // 调试动作指令优先于状态机自动动作
         let action: ActionCommand?
         if pendingStopAction {
             action = .stop
             pendingStopAction = false
-        } else {
-            action = pendingAction.map { .play($0) }
+            pendingStateMachineAction = nil
+        } else if let debugCmd = pendingAction {
+            action = .play(debugCmd)
             pendingAction = nil
+            pendingStateMachineAction = nil
+        } else if previewAction != nil {
+            action = nil
+            pendingStateMachineAction = nil
+        } else if !freezeIdle {
+            action = pendingStateMachineAction
+            pendingStateMachineAction = nil
+        } else {
+            action = nil
         }
 
+        let headRotation = freezeIdle ? .zero : latestPose.headRotation
+        let eyeTarget = freezeIdle ? .zero : latestPose.eyeTarget
         let pose = AvatarPose(
             expressionWeights: weights,
-            headRotation: motion.headRotation,
+            headRotation: headRotation,
+            eyeTarget: eyeTarget,
             action: action
         )
         renderer.apply(pose)
         playingAction = renderer.playingAction
+
+        if !freezeIdle, canMeasureTrackLatency {
+            if let sample = trackLatencyTracker.observeAppliedHeadRotation(headRotation, at: now) {
+                latencyRecorder.record(sample, metric: "M_track")
+            }
+        } else {
+            trackLatencyTracker.reset()
+        }
     }
 
     /// 按模型包围盒放一台正面相机，留 20% 边距。
@@ -248,8 +515,11 @@ final class AvatarScene {
 }
 
 struct AvatarScreen: View {
-    @State private var scene = AvatarScene()
+    @Environment(AppComposition.self) private var composition: AppComposition?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var scene = AvatarScene()
+    @State private var isShowingDebugPanel = false
 
     var body: some View {
         RealityView { (content: inout RealityViewCameraContent) in
@@ -265,6 +535,38 @@ struct AvatarScreen: View {
             ? Color(white: 0.10)
             : Color(red: 0.94, green: 0.95, blue: 0.97))
         .ignoresSafeArea()
+        .task {
+            if let composition {
+                scene.configure(from: composition)
+            }
+            await scene.startPerception()
+        }
+        .onDisappear {
+            scene.handleScreenDisappear()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                Task {
+                    await scene.handleBackground()
+                }
+            } else if newPhase == .active {
+                Task {
+                    await scene.startPerception()
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            if let message = scene.perceptionErrorMessage {
+                Text(message)
+                    .font(.caption)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.thinMaterial, in: .rect(cornerRadius: 10))
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+            }
+        }
         .overlay {
             if let loadError = scene.loadError {
                 Text(loadError)
@@ -274,8 +576,9 @@ struct AvatarScreen: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            NavigationLink {
-                AvatarDebugPanel(scene: scene)
+            Button {
+                scene.setDebugPanelPresented(true)
+                isShowingDebugPanel = true
             } label: {
                 Image(systemName: "slider.horizontal.3")
                     .font(.title3)
@@ -283,6 +586,12 @@ struct AvatarScreen: View {
                     .background(.thinMaterial, in: Circle())
             }
             .padding()
+        }
+        .navigationDestination(isPresented: $isShowingDebugPanel) {
+            AvatarDebugPanel(scene: scene)
+        }
+        .onChange(of: isShowingDebugPanel) { _, presented in
+            scene.setDebugPanelPresented(presented)
         }
         .overlay(alignment: .bottomLeading) {
             if let action = scene.previewAction, scene.loopsPreviewAction {
@@ -310,5 +619,6 @@ struct AvatarScreen: View {
 #Preview {
     NavigationStack {
         AvatarScreen()
+            .environment(AppComposition())
     }
 }

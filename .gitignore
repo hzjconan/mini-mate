@@ -18,3 +18,5 @@ Assets/avatar/reference/
 
 # macOS
 .DS_Store
+
+debug/

@@ -133,7 +133,7 @@
 | `cooldown` | 8 s（同一 `ReactionKey`） |
 | `attendingEnter` | 看向屏幕持续 200 ms |
 | `idleAfterFaceLost` | 3 s |
-| `approachThreshold` | 1 s 内距离缩短 > 0.15 m |
+| `approachThreshold` | 1 s 内距离缩短 > 0.10 m |
 
 ## 状态转换
 

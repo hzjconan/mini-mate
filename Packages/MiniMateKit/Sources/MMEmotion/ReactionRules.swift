@@ -32,7 +32,7 @@ public struct ReactionRules: Sendable, Equatable {
         attendingEnter: TimeInterval = 0.2,
         idleAfterFaceLost: TimeInterval = 3,
         approachWindow: TimeInterval = 1,
-        approachDistance: Float = 0.15
+        approachDistance: Float = 0.10
     ) {
         self.reactionDelay = reactionDelay
         self.reactionDuration = reactionDuration

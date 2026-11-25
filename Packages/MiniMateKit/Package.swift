@@ -26,7 +26,7 @@ let package = Package(
         .testTarget(name: "MMCoreTests", dependencies: ["MMCore"]),
         .testTarget(name: "MMDiagnosticsTests", dependencies: ["MMDiagnostics"]),
         .testTarget(name: "MMSecurityTests", dependencies: ["MMSecurity"]),
-        .testTarget(name: "MMPerceptionTests", dependencies: ["MMPerception"]),
-        .testTarget(name: "MMEmotionTests", dependencies: ["MMEmotion", "MMAvatar"]),
+        .testTarget(name: "MMPerceptionTests", dependencies: ["MMPerception", "MMCore"]),
+        .testTarget(name: "MMEmotionTests", dependencies: ["MMEmotion", "MMAvatar", "MMCore", "MMPerception"]),
     ]
 )

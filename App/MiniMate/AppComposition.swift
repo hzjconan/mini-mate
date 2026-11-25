@@ -1,5 +1,7 @@
 import Foundation
 import MMCore
+import MMEmotion
+import MMPerception
 import MMSecurity
 import Observation
 
@@ -15,5 +17,17 @@ final class AppComposition {
     ) {
         self.clock = clock
         self.credentialStore = credentialStore
+    }
+
+    func makePerceptionSource() -> (any PerceptionSource)? {
+        #if os(iOS)
+        ARKitPerceptionSource(clock: clock)
+        #else
+        nil
+        #endif
+    }
+
+    func makeEmotionStateMachine() -> any EmotionStateMachine {
+        RuleBasedEmotionStateMachine(clock: clock)
     }
 }

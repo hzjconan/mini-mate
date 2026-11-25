@@ -61,14 +61,16 @@ public final class RealityKitAvatarRenderer: AvatarRenderer {
     public var debugDisableHeadPose = false
     #endif
 
-    /// 骨架里负责头部朝向的关节。VRM 导出为 `J_Bip_C_Head`，USDZ 里关节不是实体，
-    /// 只能用叠加式关节动画驱动。
+    /// 骨架里负责头部与脖子朝向的关节。VRM 导出为 `J_Bip_C_Neck` / `J_Bip_C_Head`，
+    /// 直接写入 `ModelEntity.jointTransforms` 驱动，避免与动作 `SampledAnimation` 争抢动画层导致闪烁。
+    private var neckJointIndex: Int?
     private var headJointIndex: Int?
-    private var skeletonJointNames: [String] = []
     private var skeletonRestPoses: [Transform] = []
-    private var skeletonHost: Entity?
-    private var headController: AnimationPlaybackController?
-    private var lastHeadRotation = SIMD3<Float>.zero
+    private var skeletonModelEntity: ModelEntity?
+    private var smoothedHeadRotation = SIMD3<Float>.zero
+    private var lastWrittenHeadRotation = SIMD3<Float>.zero
+    /// 动作结束后用柔和系数把头角从 rest pose 平滑过渡回当前目标的剩余帧数。
+    private var headResumeFramesRemaining = 0
 
     /// `heart` 动作的爱心特效；锚点在加载后按模型包围盒计算。
     private var heartEffectEntity: Entity?
@@ -78,10 +80,12 @@ public final class RealityKitAvatarRenderer: AvatarRenderer {
 
     private static let arkitNameSet = Set(BlendShapeIndex.arkitNames)
     private static let actionFadeIn: TimeInterval = 0.2
-    private static let actionFadeOut: TimeInterval = 0.3
-    private static let headFade: TimeInterval = 0.08
-    /// 头部朝向变化小于该角度（弧度）时不重生成动画。
-    private static let headThreshold: Float = 0.5 * .pi / 180
+    /// 日常 60 Hz 头部追踪的指数平滑系数（约 2 帧达到 70%，低延迟且无抖动）。
+    private static let headSmoothFactor: Float = 0.45
+    /// 动作刚结束恢复头部追踪时的柔和指数平滑系数。
+    private static let headResumeSmoothFactor: Float = 0.18
+    /// 头部朝向变化小于该弧度时跳过写入 `jointTransforms`。
+    private static let headWriteEpsilon: Float = 1e-4
 
     public init(bundle: Bundle = .main) {
         self.bundle = bundle
@@ -121,12 +125,14 @@ public final class RealityKitAvatarRenderer: AvatarRenderer {
     public func apply(_ pose: AvatarPose) {
         applyExpressionWeights(pose.expressionWeights)
         updatePlayback()
-        applyHeadRotation(pose.headRotation)
+        // 先处理动作再处理头部朝向：避免同一帧先播 headPose 又立刻切动作，
+        // 留下正在交叉淡出的旧 headPose 与动作重叠导致闪烁。
         if pose.action == .stop {
             stopAction()
         } else if case .play(let tag)? = pose.action {
             play(tag)
         }
+        applyHeadRotation(pose.headRotation)
     }
 
     // MARK: - 表情
@@ -146,6 +152,14 @@ public final class RealityKitAvatarRenderer: AvatarRenderer {
             lastWrittenWeights[name] = value
             batches[ObjectIdentifier(target.entity), default: (target.entity, [])]
                 .writes.append((target, value))
+        }
+
+        // 兼容稀疏 AvatarPose：上帧非零但本帧省略的键自动写回 0
+        for (name, lastValue) in lastWrittenWeights where weights[name] == nil && lastValue >= 0.001 {
+            guard let target = weightTargets[name] else { continue }
+            lastWrittenWeights[name] = 0
+            batches[ObjectIdentifier(target.entity), default: (target.entity, [])]
+                .writes.append((target, 0))
         }
 
         for (_, batch) in batches {
@@ -405,15 +419,19 @@ public final class RealityKitAvatarRenderer: AvatarRenderer {
         if let current = playback, current.tag == tag, !current.controller.isComplete {
             return
         }
-        // 动作播放期间不能再叠头部的 additive 层：两者同时驱动同一骨架时
-        // RealityKit 会把 rest pose 二次套用，模型瞬间被拉飞（真机可复现）。
-        headController?.stop(blendOutDuration: 0)
-        headController = nil
-        lastHeadRotation = .zero
-        // 同一层上的新动画会以 transitionDuration 从当前姿态淡入，旧动作自然被打断。
+        // 从无动作状态（直接写 jointTransforms）切入动作时，动作首帧本就是 rest pose，
+        // 使用 transitionDuration: 0 直接启动，避免 RealityKit 从静态骨架淡入 SampledAnimation 出现闪烁；
+        // 若是打断正在播放的另一个动作（同为 SampledAnimation），再用 actionFadeIn 平滑过渡。
+        let transition: TimeInterval = (playback != nil) ? Self.actionFadeIn : 0
+        smoothedHeadRotation = .zero
+        lastWrittenHeadRotation = .zero
+        headResumeFramesRemaining = 0
+
         let controller = entry.entity.playAnimation(
             playbackResource(for: tag, entry: entry),
-            transitionDuration: Self.actionFadeIn
+            transitionDuration: transition,
+            blendLayerOffset: 0,
+            handoffType: .replace()
         )
         controller.speed = playbackSpeed
         playback = (tag, controller)
@@ -442,12 +460,16 @@ public final class RealityKitAvatarRenderer: AvatarRenderer {
 
     private func updatePlayback() {
         guard let current = playback, current.controller.isComplete else { return }
-        // 动作末帧就是静置姿态，直接停掉即可；若在这里做 0.3s 淡出，动作层和
-        // 紧接着恢复的头部 additive 层会重叠，真机上会把骨架拉飞。
+        // 动作末帧就是静置姿态，直接停掉即可。
         current.controller.stop(blendOutDuration: 0)
         playback = nil
         playingAction = nil
-        lastHeadRotation = .zero
+        smoothedHeadRotation = .zero
+        lastWrittenHeadRotation = .zero
+        headResumeFramesRemaining = 12
+        if let modelEntity = skeletonModelEntity, !skeletonRestPoses.isEmpty {
+            modelEntity.jointTransforms = skeletonRestPoses
+        }
         stopHeartEffect()
     }
 
@@ -456,14 +478,21 @@ public final class RealityKitAvatarRenderer: AvatarRenderer {
         current.controller.stop(blendOutDuration: 0)
         playback = nil
         playingAction = nil
-        lastHeadRotation = .zero
+        smoothedHeadRotation = .zero
+        lastWrittenHeadRotation = .zero
+        headResumeFramesRemaining = 12
+        if let modelEntity = skeletonModelEntity, !skeletonRestPoses.isEmpty {
+            modelEntity.jointTransforms = skeletonRestPoses
+        }
         stopHeartEffect()
     }
 
     // MARK: - 头部朝向
 
     private func findHeadJoint(in entity: Entity) {
-        guard let mesh = entity.components[ModelComponent.self]?.mesh else {
+        guard let modelEntity = entity as? ModelEntity,
+              let mesh = modelEntity.components[ModelComponent.self]?.mesh
+        else {
             for child in entity.children { findHeadJoint(in: child) }
             return
         }
@@ -471,11 +500,11 @@ public final class RealityKitAvatarRenderer: AvatarRenderer {
             let names = skeleton.joints.map(\.name)
             if let index = names.firstIndex(where: { isHeadJointName($0) }) {
                 headJointIndex = index
-                skeletonJointNames = names
+                neckJointIndex = names.firstIndex(where: { isNeckJointName($0) })
                 skeletonRestPoses = skeleton.joints.map(\.restPoseTransform)
-                skeletonHost = entity
+                skeletonModelEntity = modelEntity
                 #if DEBUG
-                print("[MMAvatar] head joint index=\(index) name=\(names[index]) joints=\(names.count)")
+                print("[MMAvatar] head joint index=\(index) name=\(names[index]) neck=\(neckJointIndex.map { names[$0] } ?? "none") joints=\(names.count)")
                 #endif
                 return
             }
@@ -487,58 +516,56 @@ public final class RealityKitAvatarRenderer: AvatarRenderer {
         name == "Head" || name.hasSuffix("_Head") || name.hasSuffix(".Head")
     }
 
-    /// 动作播放期间叠加到头骨骼上，而不是覆盖：用 additive 关节动画只写头部关节。
+    private func isNeckJointName(_ name: String) -> Bool {
+        name == "Neck" || name.hasSuffix("_Neck") || name.hasSuffix(".Neck")
+    }
+
+    /// 待机与视线追踪期间直接通过 `ModelEntity.jointTransforms` 驱动头部与脖子朝向。
     ///
-    /// `jointNames` 必须覆盖整条骨架并携带等长的 transform 数组；只给一个关节时
-    /// RealityKit 会把增量错误地套到根关节上，导致整个模型位移。
+    /// 不再使用 `FromToByAnimation` 占用 RealityKit 动画层，彻底避免与动作 `SampledAnimation`
+    /// 切换时的跨类型混合闪烁，也消除了 60 Hz 反复生成 `AnimationResource` 的开销。
     private func applyHeadRotation(_ euler: SIMD3<Float>) {
         #if DEBUG
         if debugDisableHeadPose { return }
         #endif
-        // 动作层播放期间不叠加 additive 头部姿态；两者同时驱动同一骨架会把
-        // rest pose 二次套用，真机上模型被拉出画面。
         guard playback == nil else { return }
-        guard let host = skeletonHost,
+        guard let modelEntity = skeletonModelEntity,
               let index = headJointIndex,
-              !skeletonJointNames.isEmpty
+              !skeletonRestPoses.isEmpty
         else { return }
-        guard simd_length(euler - lastHeadRotation) >= Self.headThreshold else { return }
-        lastHeadRotation = euler
 
-        if euler == .zero {
-            headController?.stop(blendOutDuration: Self.actionFadeOut)
-            headController = nil
-            return
+        let alpha: Float
+        if headResumeFramesRemaining > 0 {
+            headResumeFramesRemaining -= 1
+            alpha = Self.headResumeSmoothFactor
+        } else {
+            alpha = Self.headSmoothFactor
         }
+        smoothedHeadRotation += (euler - smoothedHeadRotation) * alpha
+        if simd_length(euler - smoothedHeadRotation) < Self.headWriteEpsilon {
+            smoothedHeadRotation = euler
+        }
+        guard simd_length(smoothedHeadRotation - lastWrittenHeadRotation) >= Self.headWriteEpsilon else { return }
+        lastWrittenHeadRotation = smoothedHeadRotation
 
-        let delta = simd_quatf(angle: euler.y, axis: [0, 1, 0])
+        var transforms = skeletonRestPoses
+        if smoothedHeadRotation != .zero {
+            if let neckIndex = neckJointIndex {
+                let neckEuler = smoothedHeadRotation * 0.35
+                let headEuler = smoothedHeadRotation * 0.65
+                transforms[neckIndex].rotation = skeletonRestPoses[neckIndex].rotation * Self.rotationQuat(from: neckEuler)
+                transforms[index].rotation = skeletonRestPoses[index].rotation * Self.rotationQuat(from: headEuler)
+            } else {
+                transforms[index].rotation = skeletonRestPoses[index].rotation * Self.rotationQuat(from: smoothedHeadRotation)
+            }
+        }
+        modelEntity.jointTransforms = transforms
+    }
+
+    private static func rotationQuat(from euler: SIMD3<Float>) -> simd_quatf {
+        simd_quatf(angle: euler.y, axis: [0, 1, 0])
             * simd_quatf(angle: euler.x, axis: [1, 0, 0])
             * simd_quatf(angle: euler.z, axis: [0, 0, 1])
-
-        // 以骨架 rest pose 作为整条骨架的基准，只有头关节叠加旋转；
-        // 单关节增量动画会被 RealityKit 错误地套到根关节上，导致整体位移。
-        let from = skeletonRestPoses
-        var to = from
-        to[index].rotation = from[index].rotation * delta
-        let animation = FromToByAnimation<JointTransforms>(
-            jointNames: skeletonJointNames,
-            name: "headPose",
-            isScaleAnimated: false,
-            isTranslationAnimated: false,
-            from: JointTransforms(from),
-            to: JointTransforms(to),
-            duration: Self.headFade,
-            isAdditive: true,
-            bindTarget: .jointTransforms,
-            fillMode: .forwards
-        )
-        guard let resource = try? AnimationResource.generate(with: animation) else { return }
-        headController = host.playAnimation(
-            resource,
-            transitionDuration: Self.headFade,
-            blendLayerOffset: 1,
-            handoffType: .replace()
-        )
     }
 
     // MARK: - 杂项
@@ -562,13 +589,13 @@ public final class RealityKitAvatarRenderer: AvatarRenderer {
         playback?.controller.stop(blendOutDuration: 0)
         playback = nil
         playingAction = nil
-        headController?.stop(blendOutDuration: 0)
-        headController = nil
         headJointIndex = nil
-        skeletonJointNames.removeAll()
+        neckJointIndex = nil
         skeletonRestPoses.removeAll()
-        skeletonHost = nil
-        lastHeadRotation = .zero
+        skeletonModelEntity = nil
+        smoothedHeadRotation = .zero
+        lastWrittenHeadRotation = .zero
+        headResumeFramesRemaining = 0
         capabilities = nil
         warnedNames.removeAll()
     }

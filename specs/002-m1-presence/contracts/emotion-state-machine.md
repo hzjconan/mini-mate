@@ -32,7 +32,7 @@ public protocol EmotionStateMachine: Sendable {
 | Listening / Thinking / Speaking | `userSpeechStarted`（打断） | — | Listening | 清空计划中的反应 |
 | 任意（非 Speaking） | 感知：`activeExpression` 进入 | 不在冷却 | 计划 Reacting | 延迟 300–800 ms 后进入 Reacting，结束回到原状态 |
 | 任意（非 Speaking） | 感知：`gesture` | 不在冷却 | Reacting | 立即进入（手势是明确意图），延迟 ≤ 300 ms |
-| Attending | 感知：快速靠近 | 1 s 内缩短 > 0.15 m | Reacting(`surprised`, `leanBack`) | |
+| Attending | 感知：快速靠近 | 1 s 内缩短 > 0.10 m | Reacting(`surprised`, `leanBack`) | |
 | 任意 | `assistantAction(a)` | — | 不改变状态 | 播放动作 `a`（优先级高于感知反应） |
 | Speaking | 感知反应 | — | 不改变 | 只允许叠加轻量表情（强度 ≤ 0.3），不打断说话表情 |
 
