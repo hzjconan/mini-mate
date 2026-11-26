@@ -64,8 +64,8 @@
 | V10 骨骼驱动 | 真机显示正常（2026-11-24；2026-11-25 改为 `jointTransforms` 直驱） | 初期用 `FromToByAnimation` 驱动头部与动作 `SampledAnimation` 切换时出现跨类型混合闪烁（`FromToByAnimation` 未动画化平移/缩放，而动作含完整变换）；2026-11-25 确认 `Armature` 实为 `ModelEntity`（118 关节与 rest pose 一致），改用 `ModelEntity.jointTransforms` + 60 Hz 指数平滑直驱脖子（35%）与头部（65%），静态切入动作改用 `transitionDuration: 0`，真机确认姿态切换零闪烁 |
 | 材质效果 | PBR 与 Blender MToon 有差异（真机已调优） | 原灯光 5000 会把浅色衣服/头发洗白；改为 2000 + 浅色背景后接近 `renders/phase1/review.html`。调色板的衣服渐变上下只差 ~9 级，PBR 光照下被压平；auto-build 已把 `hoodie_gradient.png` 的对比拉开（上提亮、下压暗），真机可见上浅下深。USDZ 的 PBR 无法完全复现 MToon 高光/描边 |
 | SC-002 M_track p50/p90 | 真机 US2 验收通过（2026-11-25）；p50/p90 数值待补填 | 真机（iPhone 16 Pro Max）验证 Idle ↔ Attending、视线与头部平滑跟随、离开 >3 s 回 Idle 触发 `lookAround`、重现触发 `notice`、快速靠近（阈值实调为 1 s 内 >10 cm）触发 `leanBack`，且姿态切换无闪烁；`M_track` 精确 p50/p90 毫秒数待从调试面板抄录补齐 |
-| SC-003 M_reflex 区间命中率 | 待填 | |
-| SC-004 相关系数 | 待填 | |
+| SC-003 M_reflex 区间命中率 | 真机 US3 验收通过（2026-11-26）；精确命中率数值待补填 | 真机验证微笑 → `happy`、皱眉 → `concerned`、惊讶 → `surprised` 均按 300–800 ms 延迟响应且 8 s 冷却与柔和底色增强生效；发现并修复 ARKit `BlendShapeLocation.rawValue` 使用 `_L`/`_R` 后缀问题 |
+| SC-004 相关系数 | 30 s 自动化回放 `maxAbsCorrelation < 0.3` 通过；真机实测通过（2026-11-26） | `NoMirroringTests` 1800 帧端到端回放（排除 8 个 `eyeLook*` 视线通道）验证未映射通道全程为 `0` 且 `maxAbsCorrelation < 0.3` |
 | SC-005 手势准确率 / 误触发 | 待填 | |
 | SC-006 帧率 / 内存 / 温度 | 待填 | |
-| 调参后的 D5 阈值 | 待填 | |
+| 调参后的 D5 阈值 | `smile: 0.50 / 0.30 (400 ms)`；`frown: 0.38 / 0.22 (500 ms)`；`surprise: 0.38 / 0.22 (300 ms)` | 2026-11-26 真机实测调优，已同步写入 `FaceSignalDeriver.Config`；同时调优 `expression-presets.json`：`concerned`（`browInnerUp: 0.85, mouthFrown: 0.75, eyeSquint: 0.30, eyeBlink: 0.20, browDown: 0.35`）、`surprised`（`jawOpen: 0.65, eyeWide: 0.90, browOuterUp: 0.66, browInnerUp: 0.50`）、`playful`（改用单眼 Wink `eyeBlinkLeft: 0.90` 替代 `tongueOut` 避免闭嘴穿模） |

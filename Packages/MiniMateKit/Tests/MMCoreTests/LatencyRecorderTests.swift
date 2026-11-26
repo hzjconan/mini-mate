@@ -82,4 +82,38 @@ struct LatencyRecorderTests {
 
         #expect(recorder.csv().contains("\"门控,打断\",500.0,500.0,1"))
     }
+
+    @Test func samplesReturnsInRecordedOrderAndEmptyWhenMissing() {
+        var recorder = LatencyRecorder()
+        #expect(recorder.samples(for: "M_reflex").isEmpty)
+
+        recorder.record(0.55, metric: "M_reflex")
+        recorder.record(0.32, metric: "M_reflex")
+        recorder.record(0.78, metric: "M_reflex")
+
+        #expect(recorder.samples(for: "M_reflex") == [0.55, 0.32, 0.78])
+    }
+
+    @Test func hitRateComputesClosedRangeRatioAndNilWhenEmpty() {
+        var recorder = LatencyRecorder()
+        let range: ClosedRange<TimeInterval> = 0.300...0.800
+
+        #expect(recorder.hitRate(in: range, for: "M_reflex") == nil)
+
+        // 闭边界 0.300 与 0.800 均计入命中；0.299 与 0.801 不计入
+        recorder.record(0.300, metric: "M_reflex")
+        recorder.record(0.800, metric: "M_reflex")
+        recorder.record(0.550, metric: "M_reflex")
+        #expect(recorder.hitRate(in: range, for: "M_reflex") == 1.0)
+
+        recorder.record(0.299, metric: "M_reflex")
+        let rate = recorder.hitRate(in: range, for: "M_reflex")
+        #expect(rate != nil)
+        #expect(abs((rate ?? 0) - 0.75) < 1e-9)
+
+        recorder.record(0.801, metric: "M_reflex")
+        let rateAfterHigh = recorder.hitRate(in: range, for: "M_reflex")
+        #expect(rateAfterHigh != nil)
+        #expect(abs((rateAfterHigh ?? 0) - 0.6) < 1e-9)
+    }
 }

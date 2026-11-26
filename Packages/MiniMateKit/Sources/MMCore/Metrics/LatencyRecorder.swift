@@ -19,6 +19,24 @@ public struct LatencyRecorder: Sendable {
         samplesByMetric[metric]?.count ?? 0
     }
 
+    /// 返回指定指标已记录的全部样本（按记录顺序）；未记录返回空数组。
+    public func samples(for metric: String) -> [TimeInterval] {
+        samplesByMetric[metric] ?? []
+    }
+
+    /// 返回样本落在闭区间 `range` 内的比例（0...1）；无样本返回 `nil`。
+    public func hitRate(in range: ClosedRange<TimeInterval>, for metric: String) -> Double? {
+        guard let samples = samplesByMetric[metric], !samples.isEmpty else {
+            return nil
+        }
+        let hits = samples.reduce(into: 0) { count, sample in
+            if range.contains(sample) {
+                count += 1
+            }
+        }
+        return Double(hits) / Double(samples.count)
+    }
+
     public func p50(for metric: String) -> TimeInterval? {
         percentile(0.5, for: metric)
     }

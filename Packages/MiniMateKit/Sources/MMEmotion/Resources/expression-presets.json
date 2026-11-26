@@ -1,1 +1,98 @@
-[]
+[
+  {
+    "blendInMs": 200,
+    "blendOutMs": 300,
+    "emotion": "happy",
+    "weights": {
+      "browInnerUp": 0.3,
+      "cheekSquintLeft": 0.4,
+      "cheekSquintRight": 0.4,
+      "jawOpen": 0.2,
+      "mouthSmileLeft": 0.8,
+      "mouthSmileRight": 0.8
+    }
+  },
+  {
+    "blendInMs": 200,
+    "blendOutMs": 300,
+    "emotion": "gentle",
+    "weights": {
+      "eyeSquintLeft": 0.2,
+      "eyeSquintRight": 0.2,
+      "mouthSmileLeft": 0.5,
+      "mouthSmileRight": 0.5
+    }
+  },
+  {
+    "blendInMs": 200,
+    "blendOutMs": 300,
+    "emotion": "sad",
+    "weights": {
+      "browInnerUp": 0.7,
+      "eyeSquintLeft": 0.3,
+      "eyeSquintRight": 0.3,
+      "mouthFrownLeft": 0.6,
+      "mouthFrownRight": 0.6
+    }
+  },
+  {
+    "blendInMs": 200,
+    "blendOutMs": 300,
+    "emotion": "surprised",
+    "weights": {
+      "browInnerUp": 0.5,
+      "browOuterUpLeft": 0.66,
+      "browOuterUpRight": 0.66,
+      "eyeWideLeft": 0.9,
+      "eyeWideRight": 0.9,
+      "jawOpen": 0.65
+    }
+  },
+  {
+    "blendInMs": 200,
+    "blendOutMs": 300,
+    "emotion": "shy",
+    "weights": {
+      "eyeSquintLeft": 0.5,
+      "eyeSquintRight": 0.5,
+      "mouthSmileLeft": 0.4,
+      "mouthSmileRight": 0.4
+    }
+  },
+  {
+    "blendInMs": 200,
+    "blendOutMs": 300,
+    "emotion": "playful",
+    "weights": {
+      "browOuterUpRight": 0.4,
+      "cheekSquintLeft": 0.35,
+      "cheekSquintRight": 0.35,
+      "eyeBlinkLeft": 0.9,
+      "jawOpen": 0.15,
+      "mouthSmileLeft": 0.75,
+      "mouthSmileRight": 0.75
+    }
+  },
+  {
+    "blendInMs": 200,
+    "blendOutMs": 300,
+    "emotion": "concerned",
+    "weights": {
+      "browDownLeft": 0.35,
+      "browDownRight": 0.35,
+      "browInnerUp": 0.85,
+      "eyeBlinkLeft": 0.2,
+      "eyeBlinkRight": 0.2,
+      "eyeSquintLeft": 0.3,
+      "eyeSquintRight": 0.3,
+      "mouthFrownLeft": 0.75,
+      "mouthFrownRight": 0.75
+    }
+  },
+  {
+    "blendInMs": 200,
+    "blendOutMs": 300,
+    "emotion": "neutral",
+    "weights": {}
+  }
+]

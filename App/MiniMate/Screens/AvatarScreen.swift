@@ -15,6 +15,13 @@ final class AvatarScene {
 
     /// 调试面板写入；非零项覆盖状态机对应权重。
     var debugWeights: [String: Float] = [:]
+    /// 调试面板“表情预设”当前选中的情绪；持久化在 scene 中，往返页面不丢失。
+    private(set) var selectedPresetEmotion: EmotionTag?
+    /// 真机调参滑杆：皱眉（concerned）眯眼与轻闭眼、惊讶（surprised）睁大眼与挑眉，实时同步至状态机预设。
+    private(set) var concernedEyeSquint: Float = ExpressionPreset.bundledDefaults[.concerned]?.weights["eyeSquintLeft"] ?? 0.25
+    private(set) var concernedEyeBlink: Float = ExpressionPreset.bundledDefaults[.concerned]?.weights["eyeBlinkLeft"] ?? 0.0
+    private(set) var surprisedEyeWide: Float = ExpressionPreset.bundledDefaults[.surprised]?.weights["eyeWideLeft"] ?? 0.80
+    private(set) var surprisedBrowOuterUp: Float = ExpressionPreset.bundledDefaults[.surprised]?.weights["browOuterUpLeft"] ?? 0.70
     private(set) var playingAction: ActionTag?
     private(set) var loadError: String?
     private(set) var capabilities: AvatarCapabilities?
@@ -31,6 +38,7 @@ final class AvatarScene {
     private(set) var isFaceTracked: Bool = false
     private(set) var isLookingAtScreen: Bool = false
     private(set) var latestFacePosition: SIMD3<Float>?
+    private(set) var latestFaceSignals: FaceSignals = FaceSignals()
     private(set) var latestHeadRotation: SIMD3<Float> = .zero
     private(set) var latestEyeTarget: SIMD2<Float> = .zero
     private(set) var perceptionErrorMessage: String?
@@ -39,6 +47,12 @@ final class AvatarScene {
     private(set) var recordedFrameCount: Int = 0
     private(set) var lastRecordedJSONLines: String?
     private(set) var latencyRecorder = LatencyRecorder()
+
+    private(set) var isRunningMirrorCheck: Bool = false
+    private(set) var mirrorCheckElapsed: TimeInterval = 0
+    let mirrorCheckTargetDuration: TimeInterval = 30.0
+    private(set) var mirrorCheckSampleCount: Int = 0
+    private(set) var lastMirrorReport: MirrorCorrelationReport?
 
     let root: Entity
     /// `RealityView` 的非 AR 虚拟相机：加入场景时采用这台 `PerspectiveCamera` 的变换。
@@ -58,6 +72,9 @@ final class AvatarScene {
     @ObservationIgnored private var latestPose = AvatarPose()
     @ObservationIgnored private var pendingStateMachineAction: ActionCommand?
     @ObservationIgnored private var trackLatencyTracker = TrackLatencyTracker()
+    @ObservationIgnored private var reflexLatencyTracker = ReflexLatencyTracker()
+    @ObservationIgnored private var mirrorCheckStartedAt: TimeInterval?
+    @ObservationIgnored private var mirrorCheckPairs: [(user: [String: Float], avatar: [String: Float])] = []
     @ObservationIgnored private var recordedFrames: [PerceptionFeatures] = []
     @ObservationIgnored private var isDebugPanelPresented = false
 
@@ -246,6 +263,7 @@ final class AvatarScene {
                 if let cmd = pose.action {
                     self.pendingStateMachineAction = cmd
                 }
+                self.observePostPerception(features: features, state: state, pose: pose)
             }
         }
     }
@@ -261,7 +279,12 @@ final class AvatarScene {
         isFaceTracked = false
         isLookingAtScreen = false
         latestFacePosition = nil
+        latestFaceSignals = FaceSignals()
         trackLatencyTracker.reset()
+        reflexLatencyTracker.reset()
+        if isRunningMirrorCheck {
+            stopMirrorCheck()
+        }
     }
 
     func handleBackground() async {
@@ -275,11 +298,16 @@ final class AvatarScene {
         isFaceTracked = false
         isLookingAtScreen = false
         latestFacePosition = nil
+        latestFaceSignals = FaceSignals()
         latestHeadRotation = .zero
         latestEyeTarget = .zero
         latestPose = AvatarPose()
         pendingStateMachineAction = nil
         trackLatencyTracker.reset()
+        reflexLatencyTracker.reset()
+        if isRunningMirrorCheck {
+            stopMirrorCheck()
+        }
     }
 
     func setDebugPanelPresented(_ presented: Bool) {
@@ -296,6 +324,7 @@ final class AvatarScene {
         isFaceTracked = features.isFaceTracked
         isLookingAtScreen = features.isLookingAtScreen
         latestFacePosition = features.facePosition
+        latestFaceSignals = features.signals
 
         if canMeasureTrackLatency {
             trackLatencyTracker.observeFacePosition(
@@ -352,6 +381,171 @@ final class AvatarScene {
     func clearMetrics() {
         latencyRecorder = LatencyRecorder()
         trackLatencyTracker.reset()
+        reflexLatencyTracker.reset()
+    }
+
+    // MARK: - SC-004 镜像检测（30 s）与表情预设调参
+
+    func startMirrorCheck() {
+        mirrorCheckPairs.removeAll(keepingCapacity: true)
+        mirrorCheckStartedAt = nil
+        mirrorCheckElapsed = 0
+        mirrorCheckSampleCount = 0
+        lastMirrorReport = nil
+        isRunningMirrorCheck = true
+    }
+
+    func stopMirrorCheck() {
+        guard isRunningMirrorCheck else { return }
+        isRunningMirrorCheck = false
+        if mirrorCheckPairs.count >= 2 {
+            lastMirrorReport = MirrorCorrelationEvaluator.evaluate(
+                pairs: mirrorCheckPairs,
+                duration: mirrorCheckElapsed
+            )
+        } else {
+            lastMirrorReport = nil
+        }
+        mirrorCheckPairs.removeAll()
+        mirrorCheckStartedAt = nil
+    }
+
+    func clearMirrorCheck() {
+        isRunningMirrorCheck = false
+        mirrorCheckPairs.removeAll()
+        mirrorCheckStartedAt = nil
+        mirrorCheckElapsed = 0
+        mirrorCheckSampleCount = 0
+        lastMirrorReport = nil
+    }
+
+    func applyPresetToDebugWeights(_ emotion: EmotionTag) {
+        selectedPresetEmotion = emotion
+        debugWeights.removeAll()
+        guard let preset = effectivePreset(for: emotion) else { return }
+        for (name, value) in preset.weights {
+            debugWeights[name] = value
+        }
+    }
+
+    func setConcernedEyeTuning(squint: Float, blink: Float) {
+        concernedEyeSquint = min(max(squint, 0), 1)
+        concernedEyeBlink = min(max(blink, 0), 0.6)
+        syncTunedPreset(for: .concerned)
+    }
+
+    func setSurprisedEyeTuning(eyeWide: Float, browOuterUp: Float) {
+        surprisedEyeWide = min(max(eyeWide, 0), 1)
+        surprisedBrowOuterUp = min(max(browOuterUp, 0), 1)
+        syncTunedPreset(for: .surprised)
+    }
+
+    func resetEyeTuning() {
+        concernedEyeSquint = ExpressionPreset.bundledDefaults[.concerned]?.weights["eyeSquintLeft"] ?? 0.25
+        concernedEyeBlink = ExpressionPreset.bundledDefaults[.concerned]?.weights["eyeBlinkLeft"] ?? 0.0
+        surprisedEyeWide = ExpressionPreset.bundledDefaults[.surprised]?.weights["eyeWideLeft"] ?? 0.80
+        surprisedBrowOuterUp = ExpressionPreset.bundledDefaults[.surprised]?.weights["browOuterUpLeft"] ?? 0.70
+        syncTunedPreset(for: .concerned)
+        syncTunedPreset(for: .surprised)
+    }
+
+    private func effectivePreset(for emotion: EmotionTag) -> ExpressionPreset? {
+        guard let base = ExpressionPreset.bundledDefaults[emotion] else { return nil }
+        var weights = base.weights
+        switch emotion {
+        case .concerned:
+            weights["eyeSquintLeft"] = concernedEyeSquint
+            weights["eyeSquintRight"] = concernedEyeSquint
+            if concernedEyeBlink > 0.001 {
+                weights["eyeBlinkLeft"] = concernedEyeBlink
+                weights["eyeBlinkRight"] = concernedEyeBlink
+            } else {
+                weights.removeValue(forKey: "eyeBlinkLeft")
+                weights.removeValue(forKey: "eyeBlinkRight")
+            }
+        case .surprised:
+            weights["eyeWideLeft"] = surprisedEyeWide
+            weights["eyeWideRight"] = surprisedEyeWide
+            weights["browOuterUpLeft"] = surprisedBrowOuterUp
+            weights["browOuterUpRight"] = surprisedBrowOuterUp
+        default:
+            break
+        }
+        return ExpressionPreset(
+            emotion: base.emotion,
+            weights: weights,
+            blendIn: base.blendIn,
+            blendOut: base.blendOut
+        )
+    }
+
+    private func syncTunedPreset(for emotion: EmotionTag) {
+        guard let preset = effectivePreset(for: emotion) else { return }
+        if selectedPresetEmotion == emotion {
+            debugWeights.removeAll()
+            for (name, value) in preset.weights {
+                debugWeights[name] = value
+            }
+        }
+        if let ruleBased = stateMachine as? RuleBasedEmotionStateMachine {
+            Task {
+                await ruleBased.updatePreset(preset)
+            }
+        }
+    }
+
+    func exportDebugWeightsAsPresetJSON(emotion: EmotionTag) -> String? {
+        var activeWeights: [String: Float] = [:]
+        for (name, value) in debugWeights where value > 0.001 {
+            activeWeights[name] = value
+        }
+        let defaultPreset = ExpressionPreset.bundledDefaults[emotion]
+        let preset = ExpressionPreset(
+            emotion: emotion,
+            weights: activeWeights,
+            blendIn: defaultPreset?.blendIn ?? .milliseconds(200),
+            blendOut: defaultPreset?.blendOut ?? .milliseconds(300)
+        )
+        guard let data = try? ExpressionPreset.encodeSingleJSON(preset) else {
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func observePostPerception(
+        features: PerceptionFeatures,
+        state: AvatarState,
+        pose: AvatarPose
+    ) {
+        #if DEBUG
+        let freezeIdle = debugFreezeIdle
+        #else
+        let freezeIdle = false
+        #endif
+
+        if !freezeIdle, !isDebugPanelPresented {
+            reflexLatencyTracker.observePerception(
+                activeExpression: features.isFaceTracked ? features.signals.activeExpression : nil,
+                state: state,
+                at: features.timestamp
+            )
+        } else {
+            reflexLatencyTracker.reset()
+        }
+
+        if isRunningMirrorCheck, features.isFaceTracked {
+            if mirrorCheckStartedAt == nil {
+                mirrorCheckStartedAt = features.timestamp
+            }
+            mirrorCheckPairs.append((user: features.rawBlendShapes, avatar: pose.expressionWeights))
+            mirrorCheckSampleCount = mirrorCheckPairs.count
+            if let started = mirrorCheckStartedAt {
+                mirrorCheckElapsed = max(0, features.timestamp - started)
+                if mirrorCheckElapsed >= mirrorCheckTargetDuration {
+                    stopMirrorCheck()
+                }
+            }
+        }
     }
 
     #if DEBUG
@@ -399,6 +593,7 @@ final class AvatarScene {
     }
 
     func resetWeights() {
+        selectedPresetEmotion = nil
         debugWeights.removeAll()
     }
 
@@ -499,6 +694,14 @@ final class AvatarScene {
         } else {
             trackLatencyTracker.reset()
         }
+
+        if !freezeIdle, !isDebugPanelPresented {
+            if let reflexSample = reflexLatencyTracker.observeAppliedState(currentStateKind, at: now) {
+                latencyRecorder.record(reflexSample, metric: "M_reflex")
+            }
+        } else {
+            reflexLatencyTracker.reset()
+        }
     }
 
     /// 按模型包围盒放一台正面相机，留 20% 边距。
@@ -556,16 +759,40 @@ struct AvatarScreen: View {
             }
         }
         .overlay(alignment: .top) {
-            if let message = scene.perceptionErrorMessage {
-                Text(message)
-                    .font(.caption)
-                    .multilineTextAlignment(.center)
+            VStack(spacing: 6) {
+                if let message = scene.perceptionErrorMessage {
+                    Text(message)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(.thinMaterial, in: .rect(cornerRadius: 10))
+                }
+                if scene.isRunningMirrorCheck {
+                    HStack(spacing: 8) {
+                        Image(systemName: "waveform.path.ecg")
+                            .foregroundStyle(.orange)
+                        Text(String(
+                            format: "镜像检测 %.0fs / %.0fs（%d 帧）",
+                            min(scene.mirrorCheckElapsed, scene.mirrorCheckTargetDuration),
+                            scene.mirrorCheckTargetDuration,
+                            scene.mirrorCheckSampleCount
+                        ))
+                        .monospacedDigit()
+                        Button("结束") {
+                            scene.stopMirrorCheck()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                    }
+                    .font(.footnote)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(.thinMaterial, in: .rect(cornerRadius: 10))
-                    .padding(.horizontal)
-                    .padding(.top, 8)
+                    .background(.thinMaterial, in: Capsule())
+                }
             }
+            .padding(.horizontal)
+            .padding(.top, 8)
         }
         .overlay {
             if let loadError = scene.loadError {

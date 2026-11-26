@@ -18,6 +18,7 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
         var delegateProxy: SessionDelegateProxy?
         var positionFilter: OneEuroFilter3D
         var lookingDetector: LookingAtScreenDetector
+        var signalDeriver: FaceSignalDeriver
         var lastTimestamp: TimeInterval?
         var isInterrupted: Bool = false
         var isRunning: Bool = false
@@ -31,12 +32,14 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
     public init(
         clock: any MMCore.Clock = SystemClock(),
         positionFilter: OneEuroFilter3D = OneEuroFilter3D(minCutoff: 3.5, beta: 2.5, dCutoff: 1.0),
-        lookingDetector: LookingAtScreenDetector = LookingAtScreenDetector()
+        lookingDetector: LookingAtScreenDetector = LookingAtScreenDetector(),
+        signalDeriver: FaceSignalDeriver = FaceSignalDeriver()
     ) {
         self.clock = clock
         self.state = OSAllocatedUnfairLock(initialState: MutableState(
             positionFilter: positionFilter,
-            lookingDetector: lookingDetector
+            lookingDetector: lookingDetector,
+            signalDeriver: signalDeriver
         ))
     }
 
@@ -94,6 +97,7 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
             s.delegateProxy = proxy
             s.positionFilter.reset()
             s.lookingDetector.reset()
+            s.signalDeriver.reset()
             s.lastTimestamp = nil
             s.isInterrupted = false
             s.isRunning = true
@@ -113,6 +117,7 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
             s.delegateProxy = nil
             s.positionFilter.reset()
             s.lookingDetector.reset()
+            s.signalDeriver.reset()
             s.lastTimestamp = nil
             s.isInterrupted = false
             s.isRunning = false
@@ -163,7 +168,7 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
             var blendShapes: [String: Float] = [:]
             blendShapes.reserveCapacity(faceAnchor.blendShapes.count)
             for (location, number) in faceAnchor.blendShapes {
-                blendShapes[location.rawValue] = number.floatValue
+                blendShapes[Self.canonicalName(for: location)] = number.floatValue
             }
 
             extractedFace = (rawPos, gazeAngle, blendShapes)
@@ -187,6 +192,7 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
             let active = Array(s.continuations.values)
             guard let face = extractedFace else {
                 s.positionFilter.reset()
+                s.signalDeriver.reset()
                 _ = s.lookingDetector.update(isFaceTracked: false, gazeAngleRadians: nil, at: timestamp)
                 let lost = PerceptionFeatures(
                     timestamp: timestamp,
@@ -206,12 +212,13 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
                 gazeAngleRadians: face.gazeAngle,
                 at: timestamp
             )
+            let signals = s.signalDeriver.update(blendShapes: face.blendShapes, at: timestamp)
 
             let tracked = PerceptionFeatures(
                 timestamp: timestamp,
                 isFaceTracked: true,
                 rawBlendShapes: face.blendShapes,
-                signals: FaceSignals(),
+                signals: signals,
                 facePosition: smoothedPos,
                 isLookingAtScreen: isLooking,
                 gesture: nil
@@ -233,6 +240,7 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
             s.isInterrupted = true
             s.positionFilter.reset()
             s.lookingDetector.reset()
+            s.signalDeriver.reset()
         }
     }
 
@@ -243,6 +251,7 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
             s.isInterrupted = false
             s.positionFilter.reset()
             s.lookingDetector.reset()
+            s.signalDeriver.reset()
             return true
         }
         if shouldResume {
@@ -255,6 +264,77 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
         config.isLightEstimationEnabled = false
         config.maximumNumberOfTrackedFaces = 1
         return config
+    }
+
+    /// Apple ARKit 的 `BlendShapeLocation.rawValue` 对左右对称键使用 `_L`/`_R` 后缀（如 `mouthSmile_L`），
+    /// 统一规范化为标准 ARKit camelCase 名称（如 `mouthSmileLeft`），与 `FaceSignalDeriver` 及 `BlendShapeIndex` 逐字对齐。
+    private static let canonicalNamesByLocation: [ARFaceAnchor.BlendShapeLocation: String] = [
+        .browDownLeft: "browDownLeft",
+        .browDownRight: "browDownRight",
+        .browInnerUp: "browInnerUp",
+        .browOuterUpLeft: "browOuterUpLeft",
+        .browOuterUpRight: "browOuterUpRight",
+        .cheekPuff: "cheekPuff",
+        .cheekSquintLeft: "cheekSquintLeft",
+        .cheekSquintRight: "cheekSquintRight",
+        .eyeBlinkLeft: "eyeBlinkLeft",
+        .eyeBlinkRight: "eyeBlinkRight",
+        .eyeLookDownLeft: "eyeLookDownLeft",
+        .eyeLookDownRight: "eyeLookDownRight",
+        .eyeLookInLeft: "eyeLookInLeft",
+        .eyeLookInRight: "eyeLookInRight",
+        .eyeLookOutLeft: "eyeLookOutLeft",
+        .eyeLookOutRight: "eyeLookOutRight",
+        .eyeLookUpLeft: "eyeLookUpLeft",
+        .eyeLookUpRight: "eyeLookUpRight",
+        .eyeSquintLeft: "eyeSquintLeft",
+        .eyeSquintRight: "eyeSquintRight",
+        .eyeWideLeft: "eyeWideLeft",
+        .eyeWideRight: "eyeWideRight",
+        .jawForward: "jawForward",
+        .jawLeft: "jawLeft",
+        .jawOpen: "jawOpen",
+        .jawRight: "jawRight",
+        .mouthClose: "mouthClose",
+        .mouthDimpleLeft: "mouthDimpleLeft",
+        .mouthDimpleRight: "mouthDimpleRight",
+        .mouthFrownLeft: "mouthFrownLeft",
+        .mouthFrownRight: "mouthFrownRight",
+        .mouthFunnel: "mouthFunnel",
+        .mouthLeft: "mouthLeft",
+        .mouthLowerDownLeft: "mouthLowerDownLeft",
+        .mouthLowerDownRight: "mouthLowerDownRight",
+        .mouthPressLeft: "mouthPressLeft",
+        .mouthPressRight: "mouthPressRight",
+        .mouthPucker: "mouthPucker",
+        .mouthRight: "mouthRight",
+        .mouthRollLower: "mouthRollLower",
+        .mouthRollUpper: "mouthRollUpper",
+        .mouthShrugLower: "mouthShrugLower",
+        .mouthShrugUpper: "mouthShrugUpper",
+        .mouthSmileLeft: "mouthSmileLeft",
+        .mouthSmileRight: "mouthSmileRight",
+        .mouthStretchLeft: "mouthStretchLeft",
+        .mouthStretchRight: "mouthStretchRight",
+        .mouthUpperUpLeft: "mouthUpperUpLeft",
+        .mouthUpperUpRight: "mouthUpperUpRight",
+        .noseSneerLeft: "noseSneerLeft",
+        .noseSneerRight: "noseSneerRight",
+        .tongueOut: "tongueOut",
+    ]
+
+    private static func canonicalName(for location: ARFaceAnchor.BlendShapeLocation) -> String {
+        if let mapped = canonicalNamesByLocation[location] {
+            return mapped
+        }
+        let raw = location.rawValue
+        if raw.hasSuffix("_L") {
+            return String(raw.dropLast(2)) + "Left"
+        }
+        if raw.hasSuffix("_R") {
+            return String(raw.dropLast(2)) + "Right"
+        }
+        return raw
     }
 }
 

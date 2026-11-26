@@ -2,8 +2,9 @@ import SwiftUI
 import MMCore
 import MMAvatar
 import MMEmotion
+import MMPerception
 
-/// 调试面板：状态与感知、录制导出、指标（M_track）、动作点播与 52 个表情系数滑杆。
+/// 调试面板：状态与感知、镜像检测（SC-004）、录制导出、指标（M_track / M_reflex）、表情预设、动作点播与 52 个表情系数滑杆。
 struct AvatarDebugPanel: View {
     let scene: AvatarScene
 
@@ -13,6 +14,19 @@ struct AvatarDebugPanel: View {
                 LabeledContent("状态", value: stateLabel(scene.currentStateKind))
                 LabeledContent("人脸追踪", value: scene.isFaceTracked ? "已追踪" : "未追踪")
                 LabeledContent("注视屏幕", value: scene.isLookingAtScreen ? "是" : "否")
+                LabeledContent(
+                    "语义信号 (笑/皱/惊)",
+                    value: String(
+                        format: "%.2f / %.2f / %.2f",
+                        scene.latestFaceSignals.smile,
+                        scene.latestFaceSignals.frown,
+                        scene.latestFaceSignals.surprise
+                    )
+                )
+                LabeledContent(
+                    "激活表情",
+                    value: scene.latestFaceSignals.activeExpression?.rawValue ?? "none"
+                )
                 LabeledContent("人脸位置 (m)", value: formatPosition(scene.latestFacePosition))
                 LabeledContent("头部欧拉角 (°)", value: formatHeadDegrees(scene.latestHeadRotation))
                 LabeledContent("视线目标", value: String(format: "(%.2f, %.2f)", scene.latestEyeTarget.x, scene.latestEyeTarget.y))
@@ -20,6 +34,74 @@ struct AvatarDebugPanel: View {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.orange)
+                }
+            }
+
+            Section("镜像检测（SC-004，30 s）") {
+                HStack {
+                    Button(scene.isRunningMirrorCheck ? "停止检测" : "开始 30 s 检测") {
+                        if scene.isRunningMirrorCheck {
+                            scene.stopMirrorCheck()
+                        } else {
+                            scene.startMirrorCheck()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(scene.isRunningMirrorCheck ? .red : .accentColor)
+
+                    Spacer()
+
+                    Text(String(
+                        format: "%.1fs / %.0fs · %d 帧",
+                        scene.mirrorCheckElapsed,
+                        scene.mirrorCheckTargetDuration,
+                        scene.mirrorCheckSampleCount
+                    ))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                }
+
+                if scene.isRunningMirrorCheck {
+                    Text("返回主界面，对着小瓜做 30 秒自由表情，完成后自动生成报告。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let report = scene.lastMirrorReport {
+                    HStack {
+                        Text("判定")
+                        Spacer()
+                        Text(report.passed ? "通过 (|r| < 0.3)" : "未通过")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                (report.passed ? Color.green : Color.red).opacity(0.18),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(report.passed ? .green : .red)
+                    }
+                    LabeledContent(
+                        "最大 |r|",
+                        value: String(
+                            format: "%.4f (%@)",
+                            report.maxAbsCorrelation,
+                            report.maxChannelName ?? "—"
+                        )
+                    )
+                    LabeledContent("平均 |r|", value: String(format: "%.4f", report.meanAbsCorrelation))
+                    ForEach(Array(report.topChannels.prefix(3)), id: \.name) { item in
+                        LabeledContent(
+                            "Top · \(item.name)",
+                            value: String(format: "r=%.3f (|r|=%.3f)", item.correlation, item.absCorrelation)
+                        )
+                    }
+                    ShareLink(item: report.summaryText()) {
+                        Label("导出镜像检测报告", systemImage: "square.and.arrow.up")
+                    }
+                    Button("清空检测结果", role: .destructive) {
+                        scene.clearMirrorCheck()
+                    }
                 }
             }
 
@@ -55,19 +137,130 @@ struct AvatarDebugPanel: View {
                 }
             }
 
-            Section("指标（M_track）") {
-                let count = scene.latencyRecorder.count(for: "M_track")
-                LabeledContent("样本数", value: "\(count)")
-                LabeledContent("p50", value: formatMilliseconds(scene.latencyRecorder.p50(for: "M_track")))
-                LabeledContent("p90", value: formatMilliseconds(scene.latencyRecorder.p90(for: "M_track")))
+            Section("指标（M_track / M_reflex）") {
+                let trackCount = scene.latencyRecorder.count(for: "M_track")
+                let reflexCount = scene.latencyRecorder.count(for: "M_reflex")
 
-                if count > 0 {
+                LabeledContent("M_track 样本数", value: "\(trackCount)")
+                LabeledContent("M_track p50", value: formatMilliseconds(scene.latencyRecorder.p50(for: "M_track")))
+                LabeledContent("M_track p90", value: formatMilliseconds(scene.latencyRecorder.p90(for: "M_track")))
+
+                LabeledContent("M_reflex 样本数", value: "\(reflexCount)")
+                LabeledContent("M_reflex p50", value: formatMilliseconds(scene.latencyRecorder.p50(for: "M_reflex")))
+                LabeledContent("M_reflex p90", value: formatMilliseconds(scene.latencyRecorder.p90(for: "M_reflex")))
+                LabeledContent("M_reflex 300–800 ms 命中率", value: formatReflexHitRate())
+
+                if trackCount > 0 || reflexCount > 0 {
                     ShareLink(item: scene.metricsCSV()) {
                         Label("导出指标 CSV", systemImage: "square.and.arrow.up")
                     }
                     Button("清空指标", role: .destructive) {
                         scene.clearMetrics()
                     }
+                }
+            }
+
+            Section("表情预设（预览与导出）") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 88))], spacing: 8) {
+                    ForEach(EmotionTag.allCases, id: \.self) { emotion in
+                        Button(emotionLabel(emotion)) {
+                            scene.applyPresetToDebugWeights(emotion)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(scene.selectedPresetEmotion == emotion ? .accentColor : .secondary)
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.vertical, 4)
+
+                Button("还原（回到不做表情状态）") {
+                    scene.resetWeights()
+                }
+                .disabled(scene.selectedPresetEmotion == nil && scene.debugWeights.values.allSatisfy { $0 <= 0.001 })
+
+                if let selected = scene.selectedPresetEmotion,
+                   let presetJSON = scene.exportDebugWeightsAsPresetJSON(emotion: selected) {
+                    ShareLink(item: presetJSON) {
+                        Label("导出「\(emotionLabel(selected))」预设 JSON", systemImage: "square.and.arrow.up")
+                    }
+                }
+            }
+
+            Section("表情幅值微调（实时生效）") {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text("皱眉 · 眯眼 (eyeSquint)")
+                            .font(.caption)
+                        Spacer()
+                        Text(String(format: "%.2f", scene.concernedEyeSquint))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { Double(scene.concernedEyeSquint) },
+                            set: { scene.setConcernedEyeTuning(squint: Float($0), blink: scene.concernedEyeBlink) }
+                        ),
+                        in: 0...1
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text("皱眉 · 轻闭眼 (eyeBlink)")
+                            .font(.caption)
+                        Spacer()
+                        Text(String(format: "%.2f", scene.concernedEyeBlink))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { Double(scene.concernedEyeBlink) },
+                            set: { scene.setConcernedEyeTuning(squint: scene.concernedEyeSquint, blink: Float($0)) }
+                        ),
+                        in: 0...0.6
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text("惊讶 · 睁大眼 (eyeWide)")
+                            .font(.caption)
+                        Spacer()
+                        Text(String(format: "%.2f", scene.surprisedEyeWide))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { Double(scene.surprisedEyeWide) },
+                            set: { scene.setSurprisedEyeTuning(eyeWide: Float($0), browOuterUp: scene.surprisedBrowOuterUp) }
+                        ),
+                        in: 0...1
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text("惊讶 · 挑眉 (browOuterUp)")
+                            .font(.caption)
+                        Spacer()
+                        Text(String(format: "%.2f", scene.surprisedBrowOuterUp))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { Double(scene.surprisedBrowOuterUp) },
+                            set: { scene.setSurprisedEyeTuning(eyeWide: scene.surprisedEyeWide, browOuterUp: Float($0)) }
+                        ),
+                        in: 0...1
+                    )
+                }
+
+                Button("重置微调为当前默认值", role: .destructive) {
+                    scene.resetEyeTuning()
                 }
             }
 
@@ -100,7 +293,7 @@ struct AvatarDebugPanel: View {
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 96))], spacing: 8) {
                     ForEach(ActionTag.allCases, id: \.self) { tag in
-                        Button(tag.rawValue) {
+                        Button(actionLabel(tag)) {
                             scene.preview(tag, loop: scene.loopsPreviewAction)
                         }
                         .buttonStyle(.bordered)
@@ -110,7 +303,7 @@ struct AvatarDebugPanel: View {
                 .padding(.vertical, 4)
 
                 if let playing = scene.playingAction {
-                    Text("播放中：\(playing.rawValue)")
+                    Text("播放中：\(actionLabel(playing))")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -150,6 +343,42 @@ struct AvatarDebugPanel: View {
             get: { Double(scene.debugWeights[name] ?? 0) },
             set: { scene.debugWeights[name] = Float($0) }
         )
+    }
+
+    private func formatReflexHitRate() -> String {
+        let samples = scene.latencyRecorder.samples(for: "M_reflex")
+        let range: ClosedRange<TimeInterval> = 0.300...0.800
+        guard let rate = scene.latencyRecorder.hitRate(in: range, for: "M_reflex"), !samples.isEmpty else {
+            return "—"
+        }
+        let hits = samples.filter { range.contains($0) }.count
+        return String(format: "%.1f%% (%d/%d)", rate * 100, hits, samples.count)
+    }
+
+    private func emotionLabel(_ emotion: EmotionTag) -> String {
+        switch emotion {
+        case .happy: "开心"
+        case .gentle: "温柔"
+        case .sad: "难过"
+        case .surprised: "惊讶"
+        case .shy: "害羞"
+        case .playful: "俏皮"
+        case .concerned: "关切"
+        case .neutral: "平静"
+        }
+    }
+
+    private func actionLabel(_ action: ActionTag) -> String {
+        switch action {
+        case .nod: "点头"
+        case .wave: "挥手"
+        case .spin: "转圈"
+        case .heart: "比心"
+        case .shyCover: "害羞遮嘴"
+        case .leanBack: "后仰"
+        case .lookAround: "张望"
+        case .notice: "注意到你"
+        }
     }
 
     private func stateLabel(_ kind: AvatarStateKind) -> String {

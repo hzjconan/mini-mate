@@ -28,6 +28,6 @@ final class AppComposition {
     }
 
     func makeEmotionStateMachine() -> any EmotionStateMachine {
-        RuleBasedEmotionStateMachine(clock: clock)
+        RuleBasedEmotionStateMachine(presets: ExpressionPreset.bundledDefaults, clock: clock)
     }
 }

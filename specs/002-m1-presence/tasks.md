@@ -91,18 +91,18 @@ description: "M1 感知与形象的任务列表"
 
 ### Tests（先写）
 
-- [ ] T030 [P] [US3] `Kit/Tests/MMPerceptionTests/FaceSignalDeriverTests.swift`：D5 公式、阈值滞回、最短持续（参数化测试）
-- [ ] T031 [P] [US3] `Kit/Tests/MMEmotionTests/ExpressionReactionTests.swift`：S-2（冷却）、S-3（延迟区间，固定随机种子）、皱眉 → `concerned`
-- [ ] T032 [P] [US3] `Kit/Tests/MMEmotionTests/NoMirroringTests.swift`：S-1；用 `RecordingAvatarRenderer` 回放录制序列，计算同名 blendShape 相关系数 < 0.3（SC-004）
+- [x] T030 [P] [US3] `Kit/Tests/MMPerceptionTests/FaceSignalDeriverTests.swift`：D5 公式、阈值滞回、最短持续（参数化测试）
+- [x] T031 [P] [US3] `Kit/Tests/MMEmotionTests/ExpressionReactionTests.swift`：S-2（冷却）、S-3（延迟区间，固定随机种子）、皱眉 → `concerned`
+- [x] T032 [P] [US3] `Kit/Tests/MMEmotionTests/NoMirroringTests.swift`：S-1；用 `RecordingAvatarRenderer` 回放录制序列，计算同名 blendShape 相关系数 < 0.3（SC-004）
 
 ### Implementation
 
-- [ ] T033 [P] [US3] `Kit/Sources/MMPerception/FaceSignalDeriver.swift`
-- [ ] T034 [P] [US3] `Kit/Sources/MMEmotion/Resources/expression-presets.json`：8 个 `EmotionTag` 预设（在调试面板中调出满意的权重后导出）
-- [ ] T035 [US3] 状态机：感知反应映射、计划反应队列、冷却、姿态合成第 2、3 步
-- [ ] T036 [P] [US3] `Kit/Sources/MMAvatar/RecordingAvatarRenderer.swift`
-- [ ] T037 [US3] 调试面板增加"镜像检测"（30 s 相关系数）与 M_reflex 记录
-- [ ] T038 [US3] 真机执行 quickstart 第三节，调参后把 D5 阈值写回 `research.md` 与 `ReactionRules` 默认值
+- [x] T033 [P] [US3] `Kit/Sources/MMPerception/FaceSignalDeriver.swift`
+- [x] T034 [P] [US3] `Kit/Sources/MMEmotion/Resources/expression-presets.json`：8 个 `EmotionTag` 预设（在调试面板中调出满意的权重后导出）
+- [x] T035 [US3] 状态机：感知反应映射、计划反应队列、冷却、姿态合成第 2、3 步
+- [x] T036 [P] [US3] `Kit/Sources/MMAvatar/RecordingAvatarRenderer.swift`
+- [x] T037 [US3] 调试面板增加"镜像检测"（30 s 相关系数）与 M_reflex 记录
+- [x] T038 [US3] 真机执行 quickstart 第三节，调参后把 D5 阈值写回 `research.md` 与 `ReactionRules` 默认值（2026-11-26 真机验收通过）
 
 **Checkpoint**：SC-003、SC-004 达成
 
