@@ -116,14 +116,14 @@ description: "M1 感知与形象的任务列表"
 
 ### Tests（先写）
 
-- [ ] T039 [P] [US4] `Kit/Tests/MMPerceptionTests/HandGestureClassifierTests.swift`：用合成关节点序列测试三种手势与若干负样本（抬手、摸脸）；边沿触发（P-3）
+- [x] T039 [P] [US4] `Kit/Tests/MMPerceptionTests/HandGestureClassifierTests.swift`：用合成关节点序列测试三种手势与若干负样本（抬手、摸脸）；边沿触发（P-3）
 
 ### Implementation
 
-- [ ] T040 [US4] `Kit/Sources/MMPerception/HandGestureClassifier.swift`（plan 关键设计中的规则）
-- [ ] T041 [US4] `ARKitPerceptionSource` 中按 12 Hz 抽帧执行 `VNDetectHumanHandPoseRequest`（`ARFrame.capturedImage`，注意前置摄像头方向）；`thermalState` 降频（P-4）
-- [ ] T042 [US4] 状态机：手势反应映射（contracts 表）
-- [ ] T043 [US4] 真机执行 quickstart 第四节，记录 SC-005
+- [x] T040 [US4] `Kit/Sources/MMPerception/HandGestureClassifier.swift`（plan 关键设计中的规则）
+- [x] T041 [US4] `ARKitPerceptionSource` 中按 12 Hz 抽帧执行 `VNDetectHumanHandPoseRequest`（`ARFrame.capturedImage`，注意前置摄像头方向）；`thermalState` 降频（P-4）
+- [x] T042 [US4] 状态机：手势反应映射（contracts 表）
+- [x] T043 [US4] 真机执行 quickstart 第四节，记录 SC-005（2026-11-26 真机验收通过，含挥手/双手及单手比心/点赞调优与冷却可调，偶发观察项记入 `docs/issues/001-periodic-bottom-left-head-drop.md`）
 
 **Checkpoint**：SC-005 达成
 

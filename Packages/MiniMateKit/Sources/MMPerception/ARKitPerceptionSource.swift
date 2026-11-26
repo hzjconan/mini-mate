@@ -2,65 +2,131 @@
 import ARKit
 import AVFoundation
 import Foundation
+import ImageIO
 import os
 import simd
+import Vision
 import MMCore
 
 private struct UncheckedBox<T>: @unchecked Sendable {
     let value: T
 }
 
-/// 基于 ARKit 人脸追踪的本地感知源（独立 ARSession，不暴露也不保存摄像头画面）。
+/// 基于 ARKit 人脸追踪与 Vision 手部检测的本地感知源（独立 ARSession，不暴露也不保存摄像头画面）。
 public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable {
+    private struct SubscriberEntry: Sendable {
+        let continuation: AsyncStream<PerceptionFeatures>.Continuation
+        var recoveredGesture: GestureEvent?
+    }
+
     private struct MutableState: Sendable {
-        var continuations: [UUID: AsyncStream<PerceptionFeatures>.Continuation] = [:]
+        var continuations: [UUID: SubscriberEntry] = [:]
         var session: UncheckedBox<ARSession>?
         var delegateProxy: SessionDelegateProxy?
         var positionFilter: OneEuroFilter3D
         var lookingDetector: LookingAtScreenDetector
         var signalDeriver: FaceSignalDeriver
+        var gestureClassifier: HandGestureClassifier
         var lastTimestamp: TimeInterval?
         var isInterrupted: Bool = false
         var isRunning: Bool = false
         var gestureRateHz: Double = 12.0
+        var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
+        var thermalObserver: UncheckedBox<NSObjectProtocol>?
+        var runGeneration: UInt64 = 0
+        var gestureResetGeneration: UInt64 = 0
+        var isVisionInFlight: Bool = false
+        var lastVisionDispatchedAt: TimeInterval?
+        var pendingGesture: GestureEvent?
+        var lastDetectedHandCount: Int = 0
     }
 
     private let clock: any MMCore.Clock
+    private let handPoseOrientation: CGImagePropertyOrientation
     private let sessionQueue = DispatchQueue(label: "ai.minimate.perception.arkit", qos: .userInteractive)
+    private let gestureQueue = DispatchQueue(label: "ai.minimate.perception.gesture", qos: .userInitiated)
     private let state: OSAllocatedUnfairLock<MutableState>
 
     public init(
         clock: any MMCore.Clock = SystemClock(),
         positionFilter: OneEuroFilter3D = OneEuroFilter3D(minCutoff: 3.5, beta: 2.5, dCutoff: 1.0),
         lookingDetector: LookingAtScreenDetector = LookingAtScreenDetector(),
-        signalDeriver: FaceSignalDeriver = FaceSignalDeriver()
+        signalDeriver: FaceSignalDeriver = FaceSignalDeriver(),
+        gestureClassifier: HandGestureClassifier = HandGestureClassifier(),
+        handPoseOrientation: CGImagePropertyOrientation = .leftMirrored
     ) {
         self.clock = clock
+        self.handPoseOrientation = handPoseOrientation
         self.state = OSAllocatedUnfairLock(initialState: MutableState(
             positionFilter: positionFilter,
             lookingDetector: lookingDetector,
-            signalDeriver: signalDeriver
+            signalDeriver: signalDeriver,
+            gestureClassifier: gestureClassifier
         ))
+    }
+
+    deinit {
+        let observer = state.withLock { s -> UncheckedBox<NSObjectProtocol>? in
+            let obs = s.thermalObserver
+            s.thermalObserver = nil
+            return obs
+        }
+        if let observer {
+            NotificationCenter.default.removeObserver(observer.value)
+        }
     }
 
     public var features: AsyncStream<PerceptionFeatures> {
         let id = UUID()
-        return AsyncStream(bufferingPolicy: .bufferingNewest(2)) { continuation in
-            state.withLock { $0.continuations[id] = continuation }
+        return AsyncStream(bufferingPolicy: .bufferingNewest(8)) { continuation in
+            state.withLock { $0.continuations[id] = SubscriberEntry(continuation: continuation, recoveredGesture: nil) }
             continuation.onTermination = { [weak self] _ in
                 self?.state.withLock { _ = $0.continuations.removeValue(forKey: id) }
             }
         }
     }
 
-    /// 供后续 US4 读取当前已夹紧的手势帧率上限（0...15 Hz，默认 12）。
+    /// 当前已夹紧的外部配置手势帧率上限（0...15 Hz，默认 12）。
     public var gestureRateHz: Double {
         state.withLock { $0.gestureRateHz }
     }
 
+    /// 当前结合热状态后实际生效的手势检测频率（0...15 Hz）。
+    public var effectiveGestureRateHz: Double {
+        state.withLock {
+            ThermalGesturePolicy.effectiveRate(configuredHz: $0.gestureRateHz, thermalState: $0.thermalState)
+        }
+    }
+
+    /// 最近一次 Vision 手部检测识别到的手数量（0...2）。
+    public var lastDetectedHandCount: Int {
+        state.withLock { $0.lastDetectedHandCount }
+    }
+
+    /// 当前缓存的系统热状态。
+    public var currentThermalState: ProcessInfo.ThermalState {
+        state.withLock { $0.thermalState }
+    }
+
+    /// 最近一次有手帧的纯数值诊断快照（供真机调试面板排查阈值，无图像数据）。
+    public var lastGestureDiagnostics: HandGestureClassifier.DebugSnapshot {
+        state.withLock { $0.gestureClassifier.lastDiagnostics }
+    }
+
     public func setGestureRate(_ hz: Double) {
         let clamped = hz.isFinite ? min(max(hz, 0), 15) : 0
-        state.withLock { $0.gestureRateHz = clamped }
+        state.withLock { s in
+            s.gestureRateHz = clamped
+            if ThermalGesturePolicy.effectiveRate(configuredHz: s.gestureRateHz, thermalState: s.thermalState) == 0 {
+                s.gestureResetGeneration &+= 1
+                s.gestureClassifier.reset()
+                s.lastDetectedHandCount = 0
+                s.pendingGesture = nil
+                for id in s.continuations.keys {
+                    s.continuations[id]?.recoveredGesture = nil
+                }
+            }
+        }
     }
 
     public func start() async throws {
@@ -91,17 +157,56 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
         session.delegate = proxy
         session.delegateQueue = sessionQueue
 
-        let oldSession = state.withLock { s -> UncheckedBox<ARSession>? in
-            let prev = s.session
+        let newObserverToken = NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            let newState = ProcessInfo.processInfo.thermalState
+            self.state.withLock { s in
+                s.thermalState = newState
+                if ThermalGesturePolicy.effectiveRate(configuredHz: s.gestureRateHz, thermalState: newState) == 0 {
+                    s.gestureResetGeneration &+= 1
+                    s.gestureClassifier.reset()
+                    s.lastDetectedHandCount = 0
+                    s.pendingGesture = nil
+                    for id in s.continuations.keys {
+                        s.continuations[id]?.recoveredGesture = nil
+                    }
+                }
+            }
+        }
+        let boxedObserver = UncheckedBox(value: newObserverToken)
+        let currentThermal = ProcessInfo.processInfo.thermalState
+
+        let (oldSession, oldObserver) = state.withLock { s -> (UncheckedBox<ARSession>?, UncheckedBox<NSObjectProtocol>?) in
+            let prevSession = s.session
+            let prevObserver = s.thermalObserver
             s.session = boxedSession
             s.delegateProxy = proxy
+            s.thermalObserver = boxedObserver
+            s.thermalState = currentThermal
+            s.runGeneration &+= 1
+            s.gestureResetGeneration &+= 1
             s.positionFilter.reset()
             s.lookingDetector.reset()
             s.signalDeriver.reset()
+            s.gestureClassifier.reset()
             s.lastTimestamp = nil
             s.isInterrupted = false
             s.isRunning = true
-            return prev
+            s.isVisionInFlight = false
+            s.lastVisionDispatchedAt = nil
+            s.pendingGesture = nil
+            s.lastDetectedHandCount = 0
+            for id in s.continuations.keys {
+                s.continuations[id]?.recoveredGesture = nil
+            }
+            return (prevSession, prevObserver)
+        }
+        if let oldObserver {
+            NotificationCenter.default.removeObserver(oldObserver.value)
         }
         oldSession?.value.delegate = nil
         oldSession?.value.pause()
@@ -111,19 +216,31 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
     }
 
     public func stop() {
-        let (session, continuations) = state.withLock { s -> (UncheckedBox<ARSession>?, [AsyncStream<PerceptionFeatures>.Continuation]) in
+        let (session, observer, continuations) = state.withLock { s -> (UncheckedBox<ARSession>?, UncheckedBox<NSObjectProtocol>?, [AsyncStream<PerceptionFeatures>.Continuation]) in
             let currentSession = s.session
+            let currentObserver = s.thermalObserver
             s.session = nil
             s.delegateProxy = nil
+            s.thermalObserver = nil
+            s.runGeneration &+= 1
+            s.gestureResetGeneration &+= 1
             s.positionFilter.reset()
             s.lookingDetector.reset()
             s.signalDeriver.reset()
+            s.gestureClassifier.reset()
             s.lastTimestamp = nil
             s.isInterrupted = false
             s.isRunning = false
-            let active = Array(s.continuations.values)
+            s.isVisionInFlight = false
+            s.lastVisionDispatchedAt = nil
+            s.pendingGesture = nil
+            s.lastDetectedHandCount = 0
+            let active = s.continuations.values.map(\.continuation)
             s.continuations.removeAll()
-            return (currentSession, active)
+            return (currentSession, currentObserver, active)
+        }
+        if let observer {
+            NotificationCenter.default.removeObserver(observer.value)
         }
         session?.value.delegate = nil
         session?.value.pause()
@@ -176,9 +293,14 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
             extractedFace = nil
         }
 
-        let (feature, continuations): (PerceptionFeatures?, [AsyncStream<PerceptionFeatures>.Continuation]) = state.withLock { s in
+        let (feature, subscribers, frameGenerations, visionDispatch): (
+            PerceptionFeatures?,
+            [(id: UUID, continuation: AsyncStream<PerceptionFeatures>.Continuation, recoveredGesture: GestureEvent?)],
+            (run: UInt64, gestureReset: UInt64)?,
+            (timestamp: TimeInterval, generation: UInt64, gestureResetGeneration: UInt64)?
+        ) = state.withLock { s in
             guard s.isRunning, !s.isInterrupted, s.session?.value === boxedSession.value else {
-                return (nil, [])
+                return (nil, [], nil, nil)
             }
 
             let timestamp: TimeInterval
@@ -188,8 +310,37 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
                 timestamp = computedTimestamp
             }
             s.lastTimestamp = timestamp
+            let currentGens = (run: s.runGeneration, gestureReset: s.gestureResetGeneration)
 
-            let active = Array(s.continuations.values)
+            // 1. 统一消费待发射手势（无论人脸是否追踪，避免比心遮脸漏触发）
+            let gestureToEmit = s.pendingGesture
+            s.pendingGesture = nil
+
+            // 2. 判定是否按有效频率调度单飞行 Vision 手部检测
+            let effectiveRate = ThermalGesturePolicy.effectiveRate(
+                configuredHz: s.gestureRateHz,
+                thermalState: s.thermalState
+            )
+            var dispatchInfo: (TimeInterval, UInt64, UInt64)? = nil
+            if effectiveRate > 0, !s.isVisionInFlight {
+                let minInterval = 1.0 / effectiveRate
+                if s.lastVisionDispatchedAt == nil || timestamp - s.lastVisionDispatchedAt! + 1e-9 >= minInterval {
+                    s.isVisionInFlight = true
+                    s.lastVisionDispatchedAt = timestamp
+                    dispatchInfo = (timestamp, s.runGeneration, s.gestureResetGeneration)
+                }
+            }
+
+            var active: [(UUID, AsyncStream<PerceptionFeatures>.Continuation, GestureEvent?)] = []
+            active.reserveCapacity(s.continuations.count)
+            for (id, entry) in s.continuations {
+                let recovered = entry.recoveredGesture
+                if recovered != nil {
+                    s.continuations[id]?.recoveredGesture = nil
+                }
+                active.append((id, entry.continuation, recovered))
+            }
+
             guard let face = extractedFace else {
                 s.positionFilter.reset()
                 s.signalDeriver.reset()
@@ -201,9 +352,9 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
                     signals: FaceSignals(),
                     facePosition: nil,
                     isLookingAtScreen: false,
-                    gesture: nil
+                    gesture: gestureToEmit
                 )
-                return (lost, active)
+                return (lost, active, currentGens, dispatchInfo)
             }
 
             let smoothedPos = s.positionFilter.filter(face.rawPos, at: timestamp)
@@ -221,14 +372,99 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
                 signals: signals,
                 facePosition: smoothedPos,
                 isLookingAtScreen: isLooking,
-                gesture: nil
+                gesture: gestureToEmit
             )
-            return (tracked, active)
+            return (tracked, active, currentGens, dispatchInfo)
         }
 
-        if let feature {
-            for continuation in continuations {
-                continuation.yield(feature)
+        // 仅提取 CVPixelBuffer 投递至独立串行 gestureQueue，避免跨队列持有 ARFrame 耗尽帧缓冲池
+        if let dispatch = visionDispatch {
+            let boxedPixelBuffer = UncheckedBox(value: frame.capturedImage)
+            let orientation = handPoseOrientation
+            gestureQueue.async { [weak self] in
+                guard let self else { return }
+                defer {
+                    self.state.withLock { s in
+                        if s.runGeneration == dispatch.generation {
+                            s.isVisionInFlight = false
+                        }
+                    }
+                }
+
+                let request = VNDetectHumanHandPoseRequest()
+                request.maximumHandCount = 2
+                let handler = VNImageRequestHandler(
+                    cvPixelBuffer: boxedPixelBuffer.value,
+                    orientation: orientation,
+                    options: [:]
+                )
+                do {
+                    try handler.perform([request])
+                } catch {
+                    return
+                }
+
+                let observations = request.results ?? []
+                let handFrames = Self.extractHandFrames(from: observations)
+
+                self.state.withLock { s in
+                    guard s.isRunning,
+                          !s.isInterrupted,
+                          s.runGeneration == dispatch.generation,
+                          s.gestureResetGeneration == dispatch.gestureResetGeneration,
+                          ThermalGesturePolicy.effectiveRate(configuredHz: s.gestureRateHz, thermalState: s.thermalState) > 0
+                    else {
+                        return
+                    }
+                    s.lastDetectedHandCount = handFrames.count
+                    if let event = s.gestureClassifier.update(hands: handFrames, at: dispatch.timestamp) {
+                        s.pendingGesture = event
+                    }
+                }
+            }
+        }
+
+        if let feature, let gens = frameGenerations {
+            var droppedGestures: [(UUID, GestureEvent)] = []
+            for sub in subscribers {
+                let frameToYield: PerceptionFeatures
+                if feature.gesture == nil,
+                   let recovered = sub.recoveredGesture,
+                   feature.timestamp - recovered.timestamp <= 1.0 {
+                    frameToYield = PerceptionFeatures(
+                        timestamp: feature.timestamp,
+                        isFaceTracked: feature.isFaceTracked,
+                        rawBlendShapes: feature.rawBlendShapes,
+                        signals: feature.signals,
+                        facePosition: feature.facePosition,
+                        isLookingAtScreen: feature.isLookingAtScreen,
+                        gesture: recovered
+                    )
+                } else {
+                    frameToYield = feature
+                }
+                if case .dropped(let dropped) = sub.continuation.yield(frameToYield),
+                   let lostGesture = dropped.gesture {
+                    droppedGestures.append((sub.id, lostGesture))
+                }
+            }
+            if !droppedGestures.isEmpty {
+                let recoveredList = droppedGestures
+                state.withLock { s in
+                    guard s.isRunning,
+                          !s.isInterrupted,
+                          s.runGeneration == gens.run,
+                          s.gestureResetGeneration == gens.gestureReset,
+                          ThermalGesturePolicy.effectiveRate(configuredHz: s.gestureRateHz, thermalState: s.thermalState) > 0
+                    else {
+                        return
+                    }
+                    for (id, gesture) in recoveredList {
+                        if s.continuations[id] != nil {
+                            s.continuations[id]?.recoveredGesture = gesture
+                        }
+                    }
+                }
             }
         }
     }
@@ -238,9 +474,19 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
         state.withLock { s in
             guard s.isRunning, s.session?.value === boxed.value else { return }
             s.isInterrupted = true
+            s.runGeneration &+= 1
+            s.gestureResetGeneration &+= 1
             s.positionFilter.reset()
             s.lookingDetector.reset()
             s.signalDeriver.reset()
+            s.gestureClassifier.reset()
+            s.isVisionInFlight = false
+            s.lastVisionDispatchedAt = nil
+            s.pendingGesture = nil
+            s.lastDetectedHandCount = 0
+            for id in s.continuations.keys {
+                s.continuations[id]?.recoveredGesture = nil
+            }
         }
     }
 
@@ -249,14 +495,68 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
         let shouldResume = state.withLock { s -> Bool in
             guard s.isRunning, s.session?.value === boxed.value else { return false }
             s.isInterrupted = false
+            s.runGeneration &+= 1
+            s.gestureResetGeneration &+= 1
             s.positionFilter.reset()
             s.lookingDetector.reset()
             s.signalDeriver.reset()
+            s.gestureClassifier.reset()
+            s.isVisionInFlight = false
+            s.lastVisionDispatchedAt = nil
+            s.pendingGesture = nil
+            s.lastDetectedHandCount = 0
+            for id in s.continuations.keys {
+                s.continuations[id]?.recoveredGesture = nil
+            }
             return true
         }
         if shouldResume {
             session.run(Self.makeConfiguration(), options: [.resetTracking, .removeExistingAnchors])
         }
+    }
+
+    private static let visionJointMapping: [(VNHumanHandPoseObservation.JointName, HandJointName)] = [
+        (.wrist, .wrist),
+        (.thumbCMC, .thumbCMC),
+        (.thumbMP, .thumbMP),
+        (.thumbIP, .thumbIP),
+        (.thumbTip, .thumbTip),
+        (.indexMCP, .indexMCP),
+        (.indexPIP, .indexPIP),
+        (.indexDIP, .indexDIP),
+        (.indexTip, .indexTip),
+        (.middleMCP, .middleMCP),
+        (.middlePIP, .middlePIP),
+        (.middleDIP, .middleDIP),
+        (.middleTip, .middleTip),
+        (.ringMCP, .ringMCP),
+        (.ringPIP, .ringPIP),
+        (.ringDIP, .ringDIP),
+        (.ringTip, .ringTip),
+        (.littleMCP, .littleMCP),
+        (.littlePIP, .littlePIP),
+        (.littleDIP, .littleDIP),
+        (.littleTip, .littleTip),
+    ]
+
+    private static func extractHandFrames(from observations: [VNHumanHandPoseObservation]) -> [HandPoseFrame] {
+        var frames: [HandPoseFrame] = []
+        frames.reserveCapacity(observations.count)
+        for obs in observations {
+            guard let recognized = try? obs.recognizedPoints(.all) else { continue }
+            var joints: [HandJointName: HandJointPoint] = [:]
+            joints.reserveCapacity(visionJointMapping.count)
+            for (visionJoint, handJoint) in visionJointMapping {
+                guard let pt = recognized[visionJoint] else { continue }
+                joints[handJoint] = HandJointPoint(
+                    x: Float(pt.location.x),
+                    y: Float(pt.location.y),
+                    confidence: Float(pt.confidence)
+                )
+            }
+            frames.append(HandPoseFrame(joints: joints))
+        }
+        return frames
     }
 
     private static func makeConfiguration() -> ARFaceTrackingConfiguration {

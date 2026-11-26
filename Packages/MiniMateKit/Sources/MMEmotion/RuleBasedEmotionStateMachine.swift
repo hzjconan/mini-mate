@@ -26,7 +26,7 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
         let fadeOutDuration: TimeInterval
     }
 
-    private let rules: ReactionRules
+    private var rules: ReactionRules
     private var presets: [EmotionTag: ExpressionPreset]
     private let clock: any MMCore.Clock
     private let random: @Sendable () -> Double
@@ -153,6 +153,11 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             break
         }
 
+        // 2.5 手势即时反应（contracts/emotion-state-machine.md 第 34 行：延迟 <= 300 ms，状态机内 0 ms 立即进入）
+        if let gesture = features.gesture {
+            handleGestureTrigger(gesture, at: now)
+        }
+
         // 3. 语义表情边沿触发（仅读取 features.signals.activeExpression）
         let newExpr = features.isFaceTracked ? features.signals.activeExpression : nil
         if newExpr != previousActiveExpression {
@@ -170,6 +175,48 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
     /// 运行时热更新单个情绪预设，供调试面板真机调参后立即在真实反应中生效。
     public func updatePreset(_ preset: ExpressionPreset) {
         presets[preset.emotion] = preset
+    }
+
+    /// 运行时热更新同类反应冷却时间（夹紧至 3...8 s），供调试面板真机调参并立即生效。
+    public func updateCooldown(_ seconds: TimeInterval, at time: TimeInterval? = nil) {
+        guard seconds.isFinite else { return }
+        let clamped = min(max(seconds, 3.0), 8.0)
+        rules.cooldown = clamped
+
+        let candidateNow = time ?? lastEvaluatedTime ?? clock.now.timeIntervalSinceReferenceDate
+        let now = candidateNow.isFinite ? candidateNow : clock.now.timeIntervalSinceReferenceDate
+        let maxUntil = now + clamped
+        if let approachUntil = approachCooldownUntil, approachUntil > maxUntil {
+            approachCooldownUntil = maxUntil
+        }
+        var adjusted = currentState.cooldowns
+        var changed = false
+        for (key, until) in adjusted where until > maxUntil {
+            adjusted[key] = maxUntil
+            changed = true
+        }
+        if changed {
+            currentState = AvatarState(
+                kind: currentState.kind,
+                enteredAt: currentState.enteredAt,
+                baseEmotion: currentState.baseEmotion,
+                cooldowns: adjusted,
+                scheduled: currentState.scheduled,
+                lastFaceSeenAt: currentState.lastFaceSeenAt
+            )
+        }
+    }
+
+    /// 仅限单元测试设置特定状态（如在 US5 完成前测试 `.speaking` 的 S-5 保护）。
+    internal func _setStateKindForTesting(_ kind: AvatarStateKind, at time: TimeInterval) {
+        currentState = AvatarState(
+            kind: kind,
+            enteredAt: time,
+            baseEmotion: currentState.baseEmotion,
+            cooldowns: currentState.cooldowns,
+            scheduled: currentState.scheduled,
+            lastFaceSeenAt: currentState.lastFaceSeenAt
+        )
     }
 
     public func resetToIdle(at time: TimeInterval? = nil) async {
@@ -562,28 +609,8 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
                 continue
             }
 
-            // 若打断了另一个纯表情 .reacting，将其当前快照推入 fadingLayers 平滑淡出
-            if case .reacting(let prev) = currentState.kind,
-               let prevPreset = presets[prev.expression] {
-                let prevFactor = Self.envelope(
-                    elapsed: evalTime - currentState.enteredAt,
-                    duration: Self.durationSeconds(prev.duration),
-                    blendIn: Self.durationSeconds(prevPreset.blendIn),
-                    blendOut: Self.durationSeconds(prevPreset.blendOut)
-                )
-                let fadeOut = Self.durationSeconds(prevPreset.blendOut)
-                if prevFactor > 0, fadeOut > 0 {
-                    var snapshot: [String: Float] = [:]
-                    for (name, val) in prevPreset.weights {
-                        snapshot[name] = val * prevFactor
-                    }
-                    fadingLayers.append(FadingLayer(
-                        weights: snapshot,
-                        startedAt: evalTime,
-                        fadeOutDuration: fadeOut
-                    ))
-                }
-            }
+            // 若打断了另一个 .reacting，将其当前快照推入 fadingLayers 平滑淡出
+            snapshotCurrentReactingIfNeeded(at: evalTime)
 
             let returnTo = Self.underlyingStateKind(of: currentState.kind)
             let reaction = Reaction(
@@ -771,6 +798,99 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
         let value = random()
         guard value.isFinite else { return 0.5 }
         return min(max(value, 0), 1)
+    }
+
+    private func handleGestureTrigger(_ gesture: GestureEvent, at now: TimeInterval) {
+        let (key, emotion, action) = Self.gestureMapping(for: gesture.kind)
+
+        // S-5：Speaking 期间不被打断，仅在非冷却时叠加轻量微表情（<= 0.3）
+        if case .speaking = currentState.kind {
+            let inCooldown = currentState.cooldowns[key].map { now < $0 } ?? false
+            if !inCooldown {
+                speakingOverlay = SpeakingOverlay(
+                    emotion: emotion,
+                    startedAt: now,
+                    duration: Self.durationSeconds(rules.reactionDuration)
+                )
+                var cooldowns = currentState.cooldowns
+                cooldowns[key] = now + rules.cooldown
+                currentState = AvatarState(
+                    kind: currentState.kind,
+                    enteredAt: currentState.enteredAt,
+                    baseEmotion: currentState.baseEmotion,
+                    cooldowns: cooldowns,
+                    scheduled: currentState.scheduled,
+                    lastFaceSeenAt: currentState.lastFaceSeenAt
+                )
+            }
+            return
+        }
+
+        // S-2 + 决策 2A：冷却期内绝不进入 .reacting、不发动作，仅激活柔和底色增强
+        if let until = currentState.cooldowns[key], now < until {
+            cooldownBoost = CooldownBoost(
+                emotion: emotion,
+                startedAt: now,
+                duration: Self.durationSeconds(rules.reactionDuration)
+            )
+            return
+        }
+
+        // 立即进入 .reacting（0 ms 延迟），旧反应推入 fadingLayers 平滑淡出
+        snapshotCurrentReactingIfNeeded(at: now)
+
+        let returnTo = Self.underlyingStateKind(of: currentState.kind)
+        let reaction = Reaction(
+            expression: emotion,
+            action: action,
+            duration: rules.reactionDuration,
+            returnTo: returnTo
+        )
+        var cooldowns = currentState.cooldowns
+        cooldowns[key] = now + rules.cooldown
+
+        currentState = AvatarState(
+            kind: .reacting(reaction),
+            enteredAt: now,
+            baseEmotion: currentState.baseEmotion,
+            cooldowns: cooldowns,
+            scheduled: currentState.scheduled,
+            lastFaceSeenAt: currentState.lastFaceSeenAt
+        )
+        activeReactionKey = key
+        pendingAction = .play(action)
+    }
+
+    private func snapshotCurrentReactingIfNeeded(at evalTime: TimeInterval) {
+        if case .reacting(let prev) = currentState.kind,
+           let prevPreset = presets[prev.expression] {
+            let prevFactor = Self.envelope(
+                elapsed: evalTime - currentState.enteredAt,
+                duration: Self.durationSeconds(prev.duration),
+                blendIn: Self.durationSeconds(prevPreset.blendIn),
+                blendOut: Self.durationSeconds(prevPreset.blendOut)
+            )
+            let fadeOut = Self.durationSeconds(prevPreset.blendOut)
+            if prevFactor > 0, fadeOut > 0 {
+                var snapshot: [String: Float] = [:]
+                for (name, val) in prevPreset.weights {
+                    snapshot[name] = val * prevFactor
+                }
+                fadingLayers.append(FadingLayer(
+                    weights: snapshot,
+                    startedAt: evalTime,
+                    fadeOutDuration: fadeOut
+                ))
+            }
+        }
+    }
+
+    private static func gestureMapping(for kind: GestureKind) -> (ReactionKey, EmotionTag, ActionTag) {
+        switch kind {
+        case .wave: (.wave, .happy, .wave)
+        case .heart: (.heart, .shy, .heart)
+        case .thumbsUp: (.thumbsUp, .happy, .nod)
+        }
     }
 
     private static func reactionMapping(for expr: UserExpression) -> (ReactionKey, EmotionTag) {

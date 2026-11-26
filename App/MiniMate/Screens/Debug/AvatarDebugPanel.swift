@@ -37,6 +37,39 @@ struct AvatarDebugPanel: View {
                 }
             }
 
+            Section("手势与热状态（US4 / SC-005）") {
+                LabeledContent("检测到手数", value: "\(scene.detectedHandCount)")
+                LabeledContent("最近手势", value: formatGestureEvent(scene.lastGestureEvent))
+                LabeledContent(
+                    "累计触发 (挥手/比心/点赞)",
+                    value: "\(scene.gestureEventCounts[.wave, default: 0]) / \(scene.gestureEventCounts[.heart, default: 0]) / \(scene.gestureEventCounts[.thumbsUp, default: 0])"
+                )
+                LabeledContent("热状态 / 采样率", value: formatThermalRate(state: scene.thermalState, rateHz: scene.effectiveGestureRateHz))
+                LabeledContent("最近手部诊断", value: formatGestureDiagnostics(scene.lastGestureDiagnostics))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text("反应冷却时间")
+                            .font(.caption)
+                        Spacer()
+                        Text(String(format: "%.1f s", scene.reactionCooldownSeconds))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { scene.reactionCooldownSeconds },
+                            set: { scene.setReactionCooldown($0) }
+                        ),
+                        in: 3.0...8.0,
+                        step: 0.5
+                    )
+                }
+                Button("清零手势计数", role: .destructive) {
+                    scene.resetGestureCounters()
+                }
+                .disabled(scene.lastGestureEvent == nil && scene.gestureEventCounts.isEmpty)
+            }
+
             Section("镜像检测（SC-004，30 s）") {
                 HStack {
                     Button(scene.isRunningMirrorCheck ? "停止检测" : "开始 30 s 检测") {
@@ -410,5 +443,40 @@ struct AvatarDebugPanel: View {
     private func formatMilliseconds(_ seconds: TimeInterval?) -> String {
         guard let seconds else { return "—" }
         return String(format: "%.1f ms", seconds * 1000)
+    }
+
+    private func formatGestureEvent(_ event: GestureEvent?) -> String {
+        guard let event else { return "none" }
+        return String(format: "%@ (%.2f)", event.kind.rawValue, event.confidence)
+    }
+
+    private func formatThermalRate(state: ProcessInfo.ThermalState, rateHz: Double) -> String {
+        let stateName: String = switch state {
+        case .nominal: "nominal"
+        case .fair: "fair"
+        case .serious: "serious"
+        case .critical: "critical"
+        @unknown default: "unknown"
+        }
+        if rateHz <= 0 {
+            return "\(stateName) · 0 Hz (已暂停)"
+        }
+        return String(format: "%@ · %.0f Hz", stateName, rateHz)
+    }
+
+    private func formatGestureDiagnostics(_ d: HandGestureClassifier.DebugSnapshot) -> String {
+        guard d.validHandCount > 0 else { return "暂无有效手部帧" }
+        let latchText = d.latchedGesture?.rawValue ?? "none"
+        return String(
+            format: "有效%d手/掌%d · 伸%d指 · ΔX%+.2f ΔY%+.2f · s=%.2f · rev=%d · latch=%@",
+            d.validHandCount,
+            d.openPalmCount,
+            d.maxExtendedFingers,
+            d.tipDeltaX,
+            d.tipDeltaY,
+            d.palmScale,
+            d.waveReversalCount,
+            latchText
+        )
     }
 }

@@ -54,6 +54,19 @@ final class AvatarScene {
     private(set) var mirrorCheckSampleCount: Int = 0
     private(set) var lastMirrorReport: MirrorCorrelationReport?
 
+    // US4 手势与热状态只读观测（3A）
+    private(set) var lastGestureEvent: GestureEvent?
+    private(set) var gestureEventCounts: [GestureKind: Int] = [:]
+    private(set) var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
+    private(set) var effectiveGestureRateHz: Double = ThermalGesturePolicy.effectiveRate(
+        configuredHz: 12.0,
+        thermalState: ProcessInfo.processInfo.thermalState
+    )
+    private(set) var detectedHandCount: Int = 0
+    private(set) var lastGestureDiagnostics: HandGestureClassifier.DebugSnapshot = .empty
+    /// 同类感知反应冷却时间（3...8 s，默认 5 s），在调试面板实时可调并同步至状态机。
+    private(set) var reactionCooldownSeconds: Double = 5.0
+
     let root: Entity
     /// `RealityView` 的非 AR 虚拟相机：加入场景时采用这台 `PerspectiveCamera` 的变换。
     let camera = PerspectiveCamera()
@@ -69,6 +82,7 @@ final class AvatarScene {
     @ObservationIgnored private var isStartingPerception = false
     @ObservationIgnored private var perceptionGeneration: UInt64 = 0
     @ObservationIgnored private var poseTask: Task<Void, Never>?
+    @ObservationIgnored private var cooldownSyncTask: Task<Void, Never>?
     @ObservationIgnored private var latestPose = AvatarPose()
     @ObservationIgnored private var pendingStateMachineAction: ActionCommand?
     @ObservationIgnored private var trackLatencyTracker = TrackLatencyTracker()
@@ -110,6 +124,7 @@ final class AvatarScene {
         self.clock = clock
         self.perceptionSource = perceptionSource
         self.stateMachine = stateMachine ?? RuleBasedEmotionStateMachine(clock: clock)
+        syncReactionCooldownToStateMachine()
 
         var intensity: Float = 2000
         var fillIntensity: Float = 900
@@ -177,6 +192,7 @@ final class AvatarScene {
             self.perceptionSource = composition.makePerceptionSource()
         }
         self.stateMachine = composition.makeEmotionStateMachine()
+        syncReactionCooldownToStateMachine()
     }
 
     func load() async {
@@ -280,6 +296,7 @@ final class AvatarScene {
         isLookingAtScreen = false
         latestFacePosition = nil
         latestFaceSignals = FaceSignals()
+        detectedHandCount = 0
         trackLatencyTracker.reset()
         reflexLatencyTracker.reset()
         if isRunningMirrorCheck {
@@ -299,6 +316,7 @@ final class AvatarScene {
         isLookingAtScreen = false
         latestFacePosition = nil
         latestFaceSignals = FaceSignals()
+        detectedHandCount = 0
         latestHeadRotation = .zero
         latestEyeTarget = .zero
         latestPose = AvatarPose()
@@ -320,11 +338,55 @@ final class AvatarScene {
         }
     }
 
+    func resetGestureCounters() {
+        lastGestureEvent = nil
+        gestureEventCounts.removeAll()
+    }
+
+    func setReactionCooldown(_ seconds: Double) {
+        guard seconds.isFinite else { return }
+        reactionCooldownSeconds = min(max(seconds, 3.0), 8.0)
+        syncReactionCooldownToStateMachine()
+    }
+
+    private func syncReactionCooldownToStateMachine() {
+        cooldownSyncTask?.cancel()
+        if let ruleBased = stateMachine as? RuleBasedEmotionStateMachine {
+            cooldownSyncTask = Task { [weak self] in
+                guard let self, !Task.isCancelled else { return }
+                await ruleBased.updateCooldown(self.reactionCooldownSeconds)
+            }
+        }
+    }
+
     private func handleIncomingFeatures(_ features: PerceptionFeatures) {
         isFaceTracked = features.isFaceTracked
         isLookingAtScreen = features.isLookingAtScreen
         latestFacePosition = features.facePosition
         latestFaceSignals = features.signals
+
+        if let gesture = features.gesture {
+            lastGestureEvent = gesture
+            gestureEventCounts[gesture.kind, default: 0] += 1
+        }
+        #if os(iOS)
+        if let arkitSource = perceptionSource as? ARKitPerceptionSource {
+            thermalState = arkitSource.currentThermalState
+            effectiveGestureRateHz = arkitSource.effectiveGestureRateHz
+            detectedHandCount = arkitSource.lastDetectedHandCount
+            lastGestureDiagnostics = arkitSource.lastGestureDiagnostics
+        } else {
+            let currentThermal = ProcessInfo.processInfo.thermalState
+            thermalState = currentThermal
+            effectiveGestureRateHz = ThermalGesturePolicy.effectiveRate(configuredHz: 12.0, thermalState: currentThermal)
+            detectedHandCount = 0
+        }
+        #else
+        let currentThermal = ProcessInfo.processInfo.thermalState
+        thermalState = currentThermal
+        effectiveGestureRateHz = ThermalGesturePolicy.effectiveRate(configuredHz: 12.0, thermalState: currentThermal)
+        detectedHandCount = 0
+        #endif
 
         if canMeasureTrackLatency {
             trackLatencyTracker.observeFacePosition(
