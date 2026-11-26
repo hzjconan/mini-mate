@@ -131,18 +131,19 @@ description: "M1 感知与形象的任务列表"
 
 ## Phase 7: User Story 5 - 对话阶段状态 (P3)
 
-**Goal**：Listening / Thinking / Speaking 与优先级规则就绪，供 M2 直接使用。
+**Goal**：Listening / Thinking / Speaking 与优先级规则就绪，供 M2 直接使用；形象提示事件 `assistantCue` 就绪，供 005 使用。
 
 **Independent Test**：quickstart 第五节。
 
 ### Tests（先写）
 
 - [ ] T044 [P] [US5] `Kit/Tests/MMEmotionTests/ConversationTransitionTests.swift`：转换表中全部对话相关行；S-4、S-5；打断清空计划反应；口型层覆盖嘴部系数
+- [ ] T044a [P] [US5] `Kit/Tests/MMEmotionTests/AvatarCueTests.swift`：EM-1–EM-5、S-7、S-8（提示替换、hold 与非 hold、Speaking 期间收到提示、`assistantSpeechEnded` 后回到提示、`assistantCueEnded`、提示期间表情与手势反应被抑制且不进入冷却、`assistantCommand` 被忽略）
 
 ### Implementation
 
-- [ ] T045 [US5] 状态机：对话事件处理、`userEmotion` → `baseEmotion` 映射、口型层（姿态合成第 4 步）
-- [ ] T046 [US5] 调试面板增加"对话事件"注入与状态显示；记录注入场景下的 M_feedback
+- [ ] T045 [US5] 状态机：对话事件处理、`userEmotion` → `baseEmotion` 映射、口型层（姿态合成第 4 步）；`assistantCue` / `assistantCueEnded`（`Reaction` 增加提示标记，emotion-state-machine.md EM-1–EM-5）；`MMCore` 新增 `AssistantCommand`、`AvatarCue`、`PlaybackResult` 与 `ConversationEvent` 新 case（data-model.md）
+- [ ] T046 [US5] 调试面板增加"对话事件"注入（含 `assistantCue` / `assistantCueEnded`）与状态显示；记录注入场景下的 M_feedback
 - [ ] T047 [US5] 真机执行 quickstart 第五节
 
 ---

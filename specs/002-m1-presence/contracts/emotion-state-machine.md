@@ -1,6 +1,6 @@
 # Contract: EmotionStateMachine
 
-**Module**: `MMEmotion` | **Feature**: `002-m1-presence`（M2 起接入真实对话事件）
+**Module**: `MMEmotion` | **Feature**: `002-m1-presence`（M2 起接入真实对话事件；005 增补形象提示事件）
 
 ## 接口
 
@@ -35,6 +35,24 @@ public protocol EmotionStateMachine: Sendable {
 | Attending | 感知：快速靠近 | 1 s 内缩短 > 0.10 m | Reacting(`surprised`, `leanBack`) | |
 | 任意 | `assistantAction(a)` | — | 不改变状态 | 播放动作 `a`（优先级高于感知反应） |
 | Speaking | 感知反应 | — | 不改变 | 只允许叠加轻量表情（强度 ≤ 0.3），不打断说话表情 |
+| 非 Listening / Thinking / Speaking | `assistantCue(c)` | — | Reacting(提示 c) | 立即播放 `c.action`（若有）；替换当前提示或感知反应（EM-1） |
+| Listening / Thinking / Speaking | `assistantCue(c)` | — | 不改变 | 记为保持中的提示（EM-2） |
+| Speaking | `assistantSpeechEnded` | 有保持中的提示 | Reacting(该提示) | 代替回到 Attending（EM-2） |
+| Reacting(提示) | `assistantCueEnded` | — | Attending（有人脸）/ Idle | 清除保持中的提示（EM-5） |
+| Reacting(提示) | 感知反应 | — | 不改变 | 不触发、不进入冷却（EM-3） |
+| 任意 | `assistantCommand` | — | 不改变 | 状态机忽略 |
+
+## 形象提示（005 增补）
+
+拍照流程等非对话轮次的形象表现经 `assistantCue` 进入状态机，不借用 `assistantEmotion`（后者只在 Speaking 生效）。不新增 `AvatarStateKind`：提示以 `.reacting` 表示，`Reaction` 增加"来自提示、不可被感知反应打断"的标记。
+
+| 编号 | 约定 |
+|---|---|
+| EM-1 | 非 Listening / Thinking / Speaking 状态收到 `assistantCue(c)` → 进入 `.reacting`（表情 `c.emotion`），立即播放 `c.action`（若有）；替换当前的提示或感知反应 |
+| EM-2 | Listening / Thinking / Speaking 中收到 `assistantCue(c)` → 记为"保持中的提示"，不改变当前状态；`assistantSpeechEnded` 后回到该提示的 `.reacting`，而不是 Attending |
+| EM-3 | 提示期间感知反应（表情、手势、快速靠近）一律不触发，也不进入冷却 |
+| EM-4 | `c.hold == true` 保持到下一个提示或 `assistantCueEnded`；`false` 按默认反应时长（1.5 s）结束后回到原状态 |
+| EM-5 | `assistantCueEnded` 清除保持中的提示，回到 Attending（有人脸）/ Idle |
 
 ## 感知反应映射
 
@@ -68,3 +86,5 @@ public protocol EmotionStateMachine: Sendable {
 | S-4 | `userSpeechEnded` 后 100 ms 内 `state.kind == .thinking` |
 | S-5 | Speaking 期间感知反应不改变 `state.kind` |
 | S-6 | 所有权重 ∈ [0, 1] |
+| S-7 | 提示（`assistantCue`）生效期间，感知反应不改变 `state.kind`，也不写入冷却 |
+| S-8 | 有保持中的提示时，`assistantSpeechEnded` 之后 `state.kind` 为该提示的 `.reacting` |

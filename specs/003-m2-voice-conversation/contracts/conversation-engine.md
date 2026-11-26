@@ -20,6 +20,11 @@ public protocol ConversationEngine: Sendable {
     /// 主动打断当前回答（如 UI 操作）。插话打断由引擎内部检测。
     func interrupt()
 
+    /// 005：暂缓回应的播放（RH-1）。
+    func holdReplies()
+    /// 005：释放暂缓的回应；用户语音开始时刻早于 t 的回应被丢弃（RH-2）。
+    func releaseReplies(discardingTurnsStartedBefore t: TimeInterval)
+
     func stop() async
 }
 
@@ -46,6 +51,7 @@ userSpeechStarted
 userSpeechEnded
   userTranscript(…, isFinal: true)?
   userEmotion(…)?                           # 必在第一个 assistantSpeechStarted 之前
+  assistantCommand(…)*                      # 005：解析到即发出（C-1）
   assistantText(…)*                         # 文字到达即发出，用于调试显示
   assistantSpeechStarted
     ( assistantEmotion(…)                   # 在该句音频开始播放时发出
@@ -61,3 +67,22 @@ userSpeechEnded
 | E-3 | `assistantEmotion` 与对应句子的第一个音频缓冲开始播放的时间差 < 50 ms |
 | E-4 | `gateStateChanged`、`connectionStateChanged` 可在任意时刻出现，不属于轮次 |
 | E-5 | 事件中不包含 API Key 或厂商原始错误中的鉴权信息 |
+
+## 指令事件（005 增补）
+
+| 编号 | 约定 |
+|---|---|
+| C-1 | `assistantCommand` 在解析到时立即发出，不等待音频播放；位于同一轮的 `userSpeechEnded` 之后、`assistantSpeechEnded` 之前 |
+| C-2 | 被打断的一轮（E-2）中，打断之前已发出的 `assistantCommand` 不撤回；打断之后旧一轮不再发出任何指令；已收到的指令是否仍然有效由消费方决定 |
+| C-3 | 回答中没有可播文字（如只有 `<user:happy><cmd:photo>`）时，MUST 在回答结束时依次发出 `assistantSpeechStarted`、`assistantSpeechEnded`；暂缓期间这两个事件推迟到释放后，被丢弃的回答不发出 |
+| C-4 | `OfflineConversationEngine`（004）不发出 `assistantCommand` |
+
+## 暂缓回应（005 增补）
+
+| 编号 | 约定 |
+|---|---|
+| RH-1 | `holdReplies()` 之后，新到达的回答照常解析并发出 `assistantCommand` / `assistantText`，但不播放 TTS、不发出 `assistantSpeech*` / `assistantEmotion` / `assistantAction` / `assistantAudioLevel` |
+| RH-2 | `releaseReplies(discardingTurnsStartedBefore: t)`：用户语音开始时刻早于 `t` 的暂缓回答全部丢弃（取消 TTS，不再发出任何事件）；其余按顺序正常播放；之后的回答恢复正常 |
+| RH-3 | 被丢弃的回答仍保留在会话历史中 |
+| RH-4 | `holdReplies` 不嵌套；未暂缓时调用 `releaseReplies` 无效果 |
+| RH-5 | 暂缓期间插话判定照常运行，但只能清除可打断的播放（audio-gating.md AF-2） |

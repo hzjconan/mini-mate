@@ -22,6 +22,22 @@
 
 `happy` · `calm` · `sad` · `tired` · `angry` · `anxious`
 
+### AssistantCommand（005 起）
+
+`photo` · `photoReady` · `photoCancel`——模型输出的 App 指令，rawValue 即 `<cmd:…>` 标签值（005 `contracts/command-tag.md`）。
+
+### AvatarCue（005 起）
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `emotion` | `EmotionTag` | 提示期间的表情 |
+| `action` | `ActionTag?` | 可选动作，收到提示时播放一次 |
+| `hold` | `Bool` | true：保持到下一个提示或 `assistantCueEnded`；false：按默认反应时长结束 |
+
+### PlaybackResult（005 起）
+
+`completed` · `stopped`——一段 App 主动播放的音频（拍照短句、预置短句）是否完整播完。
+
 ### ConversationEvent
 
 | case | 说明 |
@@ -34,6 +50,9 @@
 | `assistantText(String)` | 助手文字 |
 | `assistantSpeechStarted` / `assistantSpeechEnded` | 助手开始 / 结束发声 |
 | `assistantAudioLevel(Float)` | 0–1 音频电平，驱动口型 |
+| `assistantCommand(AssistantCommand)` | 005：模型输出的 App 指令，不影响状态机 |
+| `assistantCue(AvatarCue)` | 005：非对话轮次的形象提示（emotion-state-machine.md EM-1–EM-5） |
+| `assistantCueEnded` | 005：结束当前保持中的提示 |
 
 ## MMPerception
 
