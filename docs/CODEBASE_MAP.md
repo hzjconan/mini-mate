@@ -27,7 +27,7 @@
 
 - **iOS App 入口**：`App/MiniMate/MiniMateApp.swift`（`@main MiniMateApp` → `HomeView`，注入 `AppComposition`）
 - **组合根**：`App/MiniMate/AppComposition.swift`（构造 `SystemClock`、`KeychainCredentialStore`、`ARKitPerceptionSource`、`RuleBasedEmotionStateMachine`）
-- **核心交互页**：`App/MiniMate/Screens/AvatarScreen.swift`（支持 `-freezeIdle` / `-blendName` / `-previewAction` / `-playAction` 启动调试参数；内置 `AvatarDebugPanel` 实时观察与事件注入）
+- **核心交互页**：`App/MiniMate/Screens/AvatarScreen.swift`（支持 `-freezeIdle` / `-blendName` / `-previewAction` / `-playAction` 启动调试参数；形象页活跃期防自动锁屏；内置 `AvatarDebugPanel` 实时观察、事件注入与 10 分钟 SC-006 稳定性压测导出）
 - **真机部署脚本**：`scripts/deploy-ios.sh`（`./scripts/deploy-ios.sh [--device <UDID>] [--configuration Debug|Release] [--no-launch] [--dry-run]`）
 - **3D 资产构建管线**：`Assets/avatar/auto-build/scripts/build_phase1.py` → `export_phase1.py` → `validate_phase1.py` → `render_phase1.py` / `render_usd_preview_phase1.py`
 - **常用校验命令**：
@@ -41,6 +41,7 @@
 | :--- | :--- | :--- |
 | 时钟抽象 | `Packages/MiniMateKit/Sources/MMCore/MMCore.swift` | 统一注入 `any MMCore.Clock`（严禁裸写 `any Clock` 冲突 `Swift.Clock`）；测试用可控手动时钟 |
 | 延迟指标采集与 CSV 导出 | `Packages/MiniMateKit/Sources/MMCore/Metrics/LatencyRecorder.swift` | 统一记录 `M_track`/`M_reflex`/`M_feedback` 及 p50/p90/命中率/CSV，禁止重复造百分位统计 |
+| 稳定性压测采样聚合与物理内存工具 | `Packages/MiniMateKit/Sources/MMCore/Metrics/StabilitySessionRecorder.swift` | `StabilitySessionRecorder`（1 Hz FPS/内存/热状态/中断聚合 + Markdown/CSV）与 `ProcessMemory`（`task_vm_info.phys_footprint`） |
 | 1€ 低通滤波器 | `Packages/MiniMateKit/Sources/MMPerception/OneEuroFilter.swift` | 含非法参数夹紧与非有限值防御，`ARKitPerceptionSource` 与 `FaceSignalDeriver` 共用 |
 | 回放型感知源 | `Packages/MiniMateKit/Sources/MMPerception/ScriptedPerceptionSource.swift` | JSONL 编解码与可编程帧流回放，供离线测试与录制复现复用 |
 | 记录型渲染器 | `Packages/MiniMateKit/Sources/MMAvatar/RecordingAvatarRenderer.swift` | 实现 `AvatarRenderer` 协议，用于纯逻辑测试捕获 `AvatarPose` 输出（如非镜像校验） |

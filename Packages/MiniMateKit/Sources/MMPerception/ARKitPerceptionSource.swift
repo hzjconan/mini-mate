@@ -39,6 +39,8 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
         var lastVisionDispatchedAt: TimeInterval?
         var pendingGesture: GestureEvent?
         var lastDetectedHandCount: Int = 0
+        var sessionInterruptionCount: Int = 0
+        var thermalSessionInterruptionCount: Int = 0
     }
 
     private let clock: any MMCore.Clock
@@ -111,6 +113,21 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
     /// 最近一次有手帧的纯数值诊断快照（供真机调试面板排查阈值，无图像数据）。
     public var lastGestureDiagnostics: HandGestureClassifier.DebugSnapshot {
         state.withLock { $0.gestureClassifier.lastDiagnostics }
+    }
+
+    /// 本次感知会话期间 `ARSession` 被系统中断的累计次数（供 SC-006 稳定性观测）。
+    public var sessionInterruptionCount: Int {
+        state.withLock { $0.sessionInterruptionCount }
+    }
+
+    /// 本次感知会话期间在热降频态（`.serious` / `.critical`）下发生 `ARSession` 中断的累计次数。
+    public var thermalSessionInterruptionCount: Int {
+        state.withLock { $0.thermalSessionInterruptionCount }
+    }
+
+    /// 当前 `ARSession` 是否处于系统中断状态。
+    public var isSessionInterrupted: Bool {
+        state.withLock { $0.isInterrupted }
     }
 
     public func setGestureRate(_ hz: Double) {
@@ -200,6 +217,8 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
             s.lastVisionDispatchedAt = nil
             s.pendingGesture = nil
             s.lastDetectedHandCount = 0
+            s.sessionInterruptionCount = 0
+            s.thermalSessionInterruptionCount = 0
             for id in s.continuations.keys {
                 s.continuations[id]?.recoveredGesture = nil
             }
@@ -235,6 +254,8 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
             s.lastVisionDispatchedAt = nil
             s.pendingGesture = nil
             s.lastDetectedHandCount = 0
+            s.sessionInterruptionCount = 0
+            s.thermalSessionInterruptionCount = 0
             let active = s.continuations.values.map(\.continuation)
             s.continuations.removeAll()
             return (currentSession, currentObserver, active)
@@ -391,21 +412,22 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
                     }
                 }
 
-                let request = VNDetectHumanHandPoseRequest()
-                request.maximumHandCount = 2
-                let handler = VNImageRequestHandler(
-                    cvPixelBuffer: boxedPixelBuffer.value,
-                    orientation: orientation,
-                    options: [:]
-                )
-                do {
-                    try handler.perform([request])
-                } catch {
-                    return
+                let handFrames: [HandPoseFrame]? = autoreleasepool {
+                    let request = VNDetectHumanHandPoseRequest()
+                    request.maximumHandCount = 2
+                    let handler = VNImageRequestHandler(
+                        cvPixelBuffer: boxedPixelBuffer.value,
+                        orientation: orientation,
+                        options: [:]
+                    )
+                    do {
+                        try handler.perform([request])
+                    } catch {
+                        return nil
+                    }
+                    return Self.extractHandFrames(from: request.results ?? [])
                 }
-
-                let observations = request.results ?? []
-                let handFrames = Self.extractHandFrames(from: observations)
+                guard let handFrames else { return }
 
                 self.state.withLock { s in
                     guard s.isRunning,
@@ -474,6 +496,10 @@ public final class ARKitPerceptionSource: PerceptionSource, @unchecked Sendable 
         state.withLock { s in
             guard s.isRunning, s.session?.value === boxed.value else { return }
             s.isInterrupted = true
+            s.sessionInterruptionCount += 1
+            if s.thermalState == .serious || s.thermalState == .critical {
+                s.thermalSessionInterruptionCount += 1
+            }
             s.runGeneration &+= 1
             s.gestureResetGeneration &+= 1
             s.positionFilter.reset()

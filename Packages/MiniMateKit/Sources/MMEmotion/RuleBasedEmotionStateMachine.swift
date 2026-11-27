@@ -1038,7 +1038,8 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
         if let cooldownUntil = approachCooldownUntil, now < cooldownUntil {
             return
         }
-        guard let maxDist = distanceHistory.map(\.distance).max(),
+        guard distance <= rules.approachMaxDistance,
+              let maxDist = distanceHistory.map(\.distance).max(),
               maxDist - distance > rules.approachDistance
         else {
             return

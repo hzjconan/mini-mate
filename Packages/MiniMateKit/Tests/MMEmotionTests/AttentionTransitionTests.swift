@@ -124,23 +124,34 @@ struct AttentionTransitionTests {
         #expect(await smShort.pose(at: 11.9).action == nil)
     }
 
-    @Test("Attending 1s 内快速靠近 >10cm 触发 leanBack，1.5s 后恢复且冷却期不重复触发")
+    @Test("Attending 0.6s 内快速靠近 >14cm 且最终距离 <=38cm 触发 leanBack，远距前倾与慢速靠近不误触，1.5s 后恢复且冷却期不重复触发")
     func rapidApproachTriggersLeanBackWithRecoveryAndCooldown() async {
         let sm = RuleBasedEmotionStateMachine(
             clock: FixedClock(timeIntervalSinceReferenceDate: 10),
             random: { 0.5 }
         )
 
-        await sm.handle(makeFaceFeature(at: 10.0, position: SIMD3(0, 0, 0.60)))
-        await sm.handle(makeFaceFeature(at: 10.2, position: SIMD3(0, 0, 0.60)))
+        await sm.handle(makeFaceFeature(at: 10.0, position: SIMD3(0, 0, 0.70)))
+        await sm.handle(makeFaceFeature(at: 10.2, position: SIMD3(0, 0, 0.70)))
         #expect(await sm.state.kind == .attending)
 
-        // 0.3s 内仅靠近 8cm（<= 10cm 阈值）不触发
-        await sm.handle(makeFaceFeature(at: 10.5, position: SIMD3(0, 0, 0.52)))
+        // 远距离前倾坐正：0.3s 内从 0.70m -> 0.45m（Δ=0.25m > 0.14m，但 0.45m > 0.38m 近距门槛）不触发
+        await sm.handle(makeFaceFeature(at: 10.5, position: SIMD3(0, 0, 0.45)))
         #expect(await sm.state.kind == .attending)
 
-        // 0.5s 内从 0.60m 靠近到 0.48m（Δ = 0.12m > 0.10m）触发 leanBack
-        await sm.handle(makeFaceFeature(at: 10.7, position: SIMD3(0, 0, 0.48)))
+        // 慢速靠近：0.8s 后（超出 0.6s 窗口）从 0.52m 移到 0.36m 不触发
+        await sm.handle(makeFaceFeature(at: 11.2, position: SIMD3(0, 0, 0.52)))
+        await sm.handle(makeFaceFeature(at: 12.0, position: SIMD3(0, 0, 0.36)))
+        #expect(await sm.state.kind == .attending)
+
+        // 近距小位移：0.4s 内从 0.48m -> 0.36m（Δ=0.12m <= 0.14m 阈值，尽管最终距离 <= 0.38m）不触发
+        await sm.handle(makeFaceFeature(at: 12.2, position: SIMD3(0, 0, 0.48)))
+        await sm.handle(makeFaceFeature(at: 12.6, position: SIMD3(0, 0, 0.36)))
+        #expect(await sm.state.kind == .attending)
+
+        // 近距离快速靠近：0.4s 内从 0.52m -> 0.35m（Δ=0.17m > 0.14m 且 0.35m <= 0.38m）触发 leanBack
+        await sm.handle(makeFaceFeature(at: 13.0, position: SIMD3(0, 0, 0.52)))
+        await sm.handle(makeFaceFeature(at: 13.4, position: SIMD3(0, 0, 0.35)))
         let stateAfterApproach = await sm.state
         let expectedReaction = Reaction(
             expression: .surprised,
@@ -150,22 +161,22 @@ struct AttentionTransitionTests {
         )
         #expect(stateAfterApproach.kind == .reacting(expectedReaction))
 
-        let reactPose = await sm.pose(at: 10.7)
+        let reactPose = await sm.pose(at: 13.4)
         #expect(reactPose.action == .play(.leanBack))
 
         // 1.4s 时仍在 reacting
-        _ = await sm.pose(at: 12.1)
+        _ = await sm.pose(at: 14.8)
         #expect(await sm.state.kind == .reacting(expectedReaction))
 
-        // 1.5s 后（10.7 + 1.5 = 12.2）回到 attending
-        _ = await sm.pose(at: 12.2)
+        // 1.5s 后（13.4 + 1.5 = 14.9）回到 attending
+        _ = await sm.pose(at: 14.9)
         #expect(await sm.state.kind == .attending)
 
-        // 冷却期内（默认 8s，12.5 < 18.7）再次快速靠近不重复触发
-        await sm.handle(makeFaceFeature(at: 12.5, position: SIMD3(0, 0, 0.65)))
-        await sm.handle(makeFaceFeature(at: 12.9, position: SIMD3(0, 0, 0.40)))
+        // 冷却期内（默认 8s，15.6 < 21.4）再次近距快速靠近不重复触发
+        await sm.handle(makeFaceFeature(at: 15.2, position: SIMD3(0, 0, 0.55)))
+        await sm.handle(makeFaceFeature(at: 15.6, position: SIMD3(0, 0, 0.30)))
         #expect(await sm.state.kind == .attending)
-        #expect(await sm.pose(at: 12.9).action == nil)
+        #expect(await sm.pose(at: 15.6).action == nil)
     }
 
     @Test("人脸在右上方时头部与眼部方向正确，极端偏角严格限幅在 ±25° 内")
@@ -273,13 +284,13 @@ struct AttentionTransitionTests {
             random: { 0.5 }
         )
 
-        await sm.handle(makeFaceFeature(at: 10.0, position: SIMD3(0, 0, 0.60)))
-        await sm.handle(makeFaceFeature(at: 10.2, position: SIMD3(0, 0, 0.60)))
-        await sm.handle(makeFaceFeature(at: 10.7, position: SIMD3(0, 0, 0.40)))
-        _ = await sm.pose(at: 10.7) // 消费 leanBack
+        await sm.handle(makeFaceFeature(at: 10.0, position: SIMD3(0, 0, 0.52)))
+        await sm.handle(makeFaceFeature(at: 10.2, position: SIMD3(0, 0, 0.52)))
+        await sm.handle(makeFaceFeature(at: 10.6, position: SIMD3(0, 0, 0.34)))
+        _ = await sm.pose(at: 10.6) // 消费 leanBack
 
-        // 人脸从 10.8 起不再出现，lastFaceSeenAt == 10.7；4s 后（14.7）Reacting 到期且 14.7 - 10.7 == 4.0 >= 3.0
-        let expiredPose = await sm.pose(at: 14.7)
+        // 人脸从 10.7 起不再出现，lastFaceSeenAt == 10.6；4s 后（14.6）Reacting 到期且 14.6 - 10.6 == 4.0 >= 3.0
+        let expiredPose = await sm.pose(at: 14.6)
         #expect(await sm.state.kind == .idle)
         #expect(expiredPose.action == .play(.lookAround))
     }

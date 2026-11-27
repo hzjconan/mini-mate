@@ -321,6 +321,90 @@ struct AvatarDebugPanel: View {
                 }
             }
 
+            Section("稳定性压测（SC-006，10 分钟）") {
+                HStack {
+                    Button(scene.isRunningStabilityTest ? "停止压测" : "开始 10 分钟压测") {
+                        if scene.isRunningStabilityTest {
+                            scene.stopStabilityTest()
+                        } else {
+                            scene.startStabilityTest()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(scene.isRunningStabilityTest ? .red : .accentColor)
+
+                    Spacer()
+
+                    Text("\(formatClockDuration(scene.stabilityElapsed)) / \(formatClockDuration(scene.stabilityTargetDuration)) · \(scene.stabilitySampleCount) 采样")
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                }
+
+                if scene.isRunningStabilityTest {
+                    Text("返回主界面正常交互 10 分钟（屏幕自动保持常亮），满 10 分钟自动停止并生成报告。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if scene.isRunningStabilityTest || scene.stabilitySampleCount > 0 {
+                    LabeledContent("当前 FPS", value: String(format: "%.1f fps", scene.currentFps))
+                    LabeledContent("当前物理内存", value: String(format: "%.1f MiB", scene.currentMemoryMB))
+                    LabeledContent(
+                        "热状态 / 手势率",
+                        value: formatThermalRate(state: scene.thermalState, rateHz: scene.effectiveGestureRateHz)
+                    )
+                }
+
+                if let report = scene.lastStabilityReport {
+                    HStack {
+                        Text("SC-006 判定")
+                        Spacer()
+                        Text(report.passed ? "通过" : "未通过")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(
+                                (report.passed ? Color.green : Color.red).opacity(0.18),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(report.passed ? .green : .red)
+                    }
+                    LabeledContent(
+                        "时长 / 样本数",
+                        value: String(format: "%.1f / %.0f s（%d）", report.duration, report.targetDuration, report.sampleCount)
+                    )
+                    LabeledContent(
+                        "FPS (avg/p50/p10/min)",
+                        value: String(format: "%.1f / %.1f / %.1f / %.1f", report.avgFps, report.p50Fps, report.p10Fps, report.minFps)
+                    )
+                    LabeledContent(
+                        "内存 (avg / max)",
+                        value: String(format: "%.1f / %.1f MiB", report.avgMemoryMB, report.maxMemoryMB)
+                    )
+                    LabeledContent(
+                        "热状态峰值 / 变迁",
+                        value: "\(report.peakThermalLevel.rawValue)（\(report.thermalTransitions.count) 节点）"
+                    )
+                    LabeledContent(
+                        "ARSession 中断（总/热态）",
+                        value: "\(report.sessionInterruptionCount) / \(report.thermalSessionInterruptionCount)"
+                    )
+                    LabeledContent(
+                        "人脸追踪占比",
+                        value: String(format: "%.1f%%", report.faceTrackedRatio * 100.0)
+                    )
+                    ShareLink(item: report.summaryMarkdown()) {
+                        Label("导出稳定性报告 (Markdown)", systemImage: "square.and.arrow.up")
+                    }
+                    ShareLink(item: report.csv()) {
+                        Label("导出逐秒明细 (CSV)", systemImage: "tablecells")
+                    }
+                    Button("清空压测结果", role: .destructive) {
+                        scene.clearStabilityTest()
+                    }
+                }
+            }
+
             Section("录制感知") {
                 HStack {
                     Button(scene.isRecordingPerception ? "停止录制" : "开始录制") {
@@ -652,6 +736,11 @@ struct AvatarDebugPanel: View {
     private func formatMilliseconds(_ seconds: TimeInterval?) -> String {
         guard let seconds else { return "—" }
         return String(format: "%.1f ms", seconds * 1000)
+    }
+
+    private func formatClockDuration(_ seconds: TimeInterval) -> String {
+        let clamped = max(0, Int(seconds.rounded(.down)))
+        return String(format: "%02d:%02d", clamped / 60, clamped % 60)
     }
 
     private func formatGestureEvent(_ event: GestureEvent?) -> String {

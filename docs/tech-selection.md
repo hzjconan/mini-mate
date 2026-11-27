@@ -1,8 +1,8 @@
-# MiniMate 技术选型文档（v3.6）
+# MiniMate 技术选型文档（v3.7）
 
 | 项目 | 内容 |
 |---|---|
-| 文档状态 | v3.6。已确定对话架构为方案 B（实时语音模型只出文字 + 情感 TTS），方案 C 为备选；v3.3–v3.5 回写 M0 能力探测实测结论；剩余未决项集中在第 9 章「待验证项」 |
+| 文档状态 | v3.7。已确定对话架构为方案 B（实时语音模型只出文字 + 情感 TTS），方案 C 为备选；v3.3–v3.5 回写 M0 能力探测实测结论；v3.7 回写 M1（002）真机实测与 V10 验证结论；剩余未决项集中在第 9 章「待验证项」 |
 | 适用阶段 | MVP / 个人自用 |
 | 目标平台 | iOS 26+（仅 iPhone） |
 | 参考设备 | iPhone 16 Pro Max（A18 Pro / 8GB / TrueDepth） |
@@ -42,7 +42,7 @@
 |---|---|---|
 | 内存 | 8GB 机型单 App 实际可用约 3–4GB，超出会被 jetsam 杀进程 | 自建端侧 3B 4bit（约 2GB 权重 + KV cache）逼近警戒线 |
 | entitlement | 自建 3B 模型大概率需要 `increased-memory-limit`；付费账号可申请（M4 时实测上限） | 优先 Foundation Models 的理由之一 |
-| 热 | 持续推理 2–3 分钟后降频 | 不设计长时间连续推理；视觉任务限流 |
+| 热 | 持续 LLM 推理 2–3 分钟后降频；M1 纯视觉负载（ARKit 60 fps + Vision 12 Hz + RealityKit）实测 10 分钟全程 `nominal`（avg 59.95 fps / max 518.2 MiB，见 `specs/002-m1-presence/research.md`） | 不设计长时间连续端侧 LLM 推理；视觉任务保留热降频策略（`ThermalGesturePolicy`） |
 | 后台 | 锁屏/切后台后摄像头、麦克风与推理均停止 | 不做"后台陪伴"；切后台即断开实时会话 |
 | 签名 | 付费个人会员约 1 年有效期，到期 Xcode 一键续签；免费账号仅 7 天且设备注册名额受限、无法在线删除 | 2026-11-20 已购入付费会员（免费账号设备名额实测打满） |
 | 网络 | 云端调用依赖公网；实时语音为长连接 WebSocket | 必须有断网/弱网降级与重连路径 |
@@ -86,8 +86,8 @@
 | 手势 | Vision `VNDetectHumanHandPoseRequest`，跑在 `ARFrame.capturedImage` 上 | 10–15 fps | 21 个关节点；挥手/比心/点赞等语义自行判断。iOS 上 ARKit 无手部关节 API |
 | 场景/物品 | 不在端侧做 | — | 后续走云端多模态（见 4.12） |
 
-- **为什么是 ARKit 而不是 Vision**：Vision 的 `VNFaceObservation` 只有关键点、roll/yaw/pitch 与 captureQuality，没有表情语义；ARKit 直接给出 52 维系数。
-- **负载**：ARKit 人脸追踪由系统完成；真正跑 Vision 推理的只有手部一路，10–15 次/秒。
+- **为什么是 ARKit 而不是 Vision**：Vision 的 `VNFaceObservation` 只有关键点、roll/yaw/pitch 与 captureQuality，没有表情语义；ARKit 直接给出 52 维系数（实测真机 `BlendShapeLocation.rawValue` 返回 `_L`/`_R` 后缀，已在 `ARKitPerceptionSource` 规范化映射为 camelCase `Left`/`Right`）。
+- **负载与手势规则**：ARKit 人脸追踪由系统完成；真正跑 Vision 推理的只有手部一路（12 Hz 抽帧 + 热降频）。基于 21 关节点的规则法已实测覆盖挥手、双手/单手比心与点赞并达成 SC-005（无需启用 CreateML 退路）。
 - **session 封装**：ARKit 配置集中在一个可替换的 `PerceptionSource` 实现里。未来"看物品"可能改用 `ARWorldTrackingConfiguration` + `userFaceTrackingEnabled`（前后摄同时开），但**M1 不实现**，只保证可替换。
 
 ### 4.2 情绪状态机
@@ -123,6 +123,8 @@
 **口型**：第一版用 TTS 输出音频的电平驱动 `jawOpen` 等口部形变；若所选 TTS 返回音素/字级时间戳，再升级为按音素对口型。
 
 **输出**：`AvatarPose`——形象**自己的** blendShape 权重 + 头部/视线朝向 + 动作片段 ID。
+
+> M1 实测调参注记（2026-11-26 / 2026-11-27）：`FaceSignalDeriver` 进入/退出阈值已按真机实测调整为 `smile 0.50/0.30`、`frown 0.38/0.22`、`surprise 0.38/0.22`；App 反应冷却默认 `5 s`（`3–8 s` 可调，源码默认 `8 s`）；快速靠近后仰收紧为 `0.6 s` 内缩短 `>14 cm` 且最终距离 `≤0.38 m`；005 增补的非对话形象提示 `assistantCue`（EM-1–EM-5）已在 M1 US5 落地。
 
 ### 4.3 对话引擎：方案 B 为主，C 为备选
 
@@ -250,18 +252,18 @@
 
 | 方案 | 定位 | 说明 |
 |---|---|---|
-| **RealityKit + USDZ（52 blendShape）** | 首选 | 用 `BlendShapeWeightsComponent` 驱动（iOS 18+，需确认）；表现力强 |
+| **RealityKit + USDZ（52 blendShape）** | 首选（M1 已验证） | 用 `BlendShapeWeightsComponent` 驱动（iOS 18+，真机 52/52 实测通过）；表现力强 |
 | Live2D（Cubism SDK for Native） | 备选 | 若走二次元 2D 路线；需第三方引擎集成 |
 | 序列帧 | 仅占位 | 只能播离散状态，**无法被连续系数驱动**；可在素材未就绪时用于调试状态机 |
-| SceneKit | 不采用 | 已进入弃用流程（需确认） |
+| SceneKit | 不采用 | 已进入弃用流程 |
 
-**素材管线是 M1 的第一个技术风险**：
+**素材管线验证结论（V10，2026-11-25 已通过）**：
 
-- 候选素材：VRoid 模型中带 Perfect Sync（52 个 ARKit blendShape）的。
-- VRoid 输出 VRM（基于 glTF），**RealityKit 不能直接加载**，需经 Blender 等转为 USDZ，blendShape、骨骼、材质是否完整保留需实测。
-- 动作片段（点头、转圈、挥手等）需随模型一并准备，与 `<act:…>` 枚举一一对应。
-- 备选：在 Blender 中自建简化风格化模型并绑定 52 个形变。
-- 注意模型的使用许可。
+- 已选定带 Perfect Sync（52 个 ARKit blendShape）的 VRoid 模型（`VRoid_V110_Female_v1.1.3.vrm`），由 `Assets/avatar/auto-build/` 的 Blender 无头脚本自动完成重绘、8 动作生成与 USDZ 导出，52/52 形态键与 8/8 动作在真机全部验证通过，无需回退自建模型或 Live2D。
+- **M1 实测修正了三项早期假设**：
+  1. **多动作打包**：USDZ 多条独立 `SkelAnimation` 绑定易失真，实测改为合并为单条 `SkelAnimation` 时间线 + `minimate.actions.json` 清单 + 运行时 `trimmed` 裁剪；
+  2. **头部骨骼驱动**：`FromToByAnimation` 与动作 `SampledAnimation` 切换会产生跨类型混合闪烁，实测改为 `ModelEntity.jointTransforms` + 60 Hz 指数平滑直驱脖子（35%）与头部（65%），消除闪烁；
+  3. **MToon 材质**：USDZ 中 MToon 退化为 PBR 后，通过调整场景灯光（5000→2000）与拉大贴图渐变对比度已满足观感，暂无需自写 `ShaderGraphMaterial`。
 
 ### 4.12 云端多模态"看图"（不进 MVP）
 
@@ -273,6 +275,8 @@
 ---
 
 ## 5. 接口设计
+
+> 说明：本章为选型期概念接口草图；现行准确契约（含跨平台 `rawBlendShapes` 字典、`pose(at:)` 按时间求值及 005 `assistantCue` 扩展）以 `specs/002-m1-presence/contracts/` 与 `data-model.md` 为准。
 
 ```swift
 // 感知
@@ -416,26 +420,33 @@ M1 与 M2 可以并行；M1 不应跳过，它是产品体验的地基。
 
 | # | 问题 | 验证方式 | 时间点 | 失败时的退路 |
 |---|---|---|---|---|
-| V1 | Foundation Models 在本机/本地区是否可用、是否支持中文 | `SystemLanguageModel.default.availability` + 中文对话试跑 | M0 | M4 走 MLX；离线意图匹配以关键词 + CreateML 为主，`NLEmbedding` 简体句向量可用但区分度弱，仅作辅助层（v3.4 复核） |
-| V2 | `SpeechTranscriber` 是否支持 zh-CN | 打印 `supportedLocales` | M0 | `SFSpeechRecognizer`（on-device） |
-| V3 | `SpeechDetector` 能否独立用作人声闸门、效果如何 | 真机安静/噪音/电视背景下对比误开率 | M0–M2b | 能量阈值 + 过零率 |
-
-**实测结论（2026-11-20，001 M0 探测；iPhone 16 Pro Max 国行 CH/A / iOS 27.2）**：
-
-- **V1 ✅ 已测**：`deviceNotEligible`——国行型号硬屏蔽 Apple Intelligence，M0 结论为本机 FM 不可用（退路生效）。
-- **V2 ✅ 已测**：zh_CN 支持且资源已安装（zh_TW/zh_HK/zh_CN 均支持，已装 zh_TW、zh_CN）。
-- **V3 部分已测**：`SpeechDetector` 可构造并加入 `SpeechAnalyzer`；误开率/效果仍待 M2b 实测。
-- **NLEmbedding 简体句向量**（非 V 表条目，但属 V1 退路依赖项）：**可用**（v3.4 复核推翻 v3.3 的"返回 nil"）。iOS 27.2 上同一进程内首次 `sentenceEmbedding(for:)` 会返回 nil，需重试或改用 `sentenceEmbedding(for:revision:)`。区分度弱：3 组近/远义句只有 2 组排序正确（"我有点难过"离"明天要开会"比离"心情不太好"更近），且近义句距离 0.37–0.49 → 离线意图匹配仍以关键词 + CreateML 为主，embedding 只作辅助层，阈值须实测。`NLContextualEmbedding` 中文模型（512 维）**可用**：进程内首次 `load()` 会失败（`hasAvailableAssets` 同时误报 false），但**不是固定延迟**——先等 300 ms 再首次调用仍 5/5 失败，首次失败后 50–100 ms 重试即成功（5/5）；`requestAssets()` 首次可达 5.5 s，诊断不使用。详见 001 research.md。
-- **ARKit 人脸追踪**：`isSupported = true`（预期）。
+| V1 | Foundation Models 在本机/本地区是否可用、是否支持中文 | `SystemLanguageModel.default.availability` + 中文对话试跑 | M0（✅ 已测） | M4 走 MLX；离线意图匹配以关键词 + CreateML 为主，`NLEmbedding` 简体句向量可用但区分度弱，仅作辅助层（v3.4 复核） |
+| V2 | `SpeechTranscriber` 是否支持 zh-CN | 打印 `supportedLocales` | M0（✅ 已测） | `SFSpeechRecognizer`（on-device） |
+| V3 | `SpeechDetector` 能否独立用作人声闸门、效果如何 | 真机安静/噪音/电视背景下对比误开率 | M0–M2b（部分已测） | 能量阈值 + 过零率 |
 | V4 | 候选厂商实时接口能否只输出文字 | 查文档 + 试接（阿里百炼 Qwen-Omni、火山引擎豆包、OpenAI） | M2a | 方案 C |
 | V5 | 只出文字时模型是否仍理解语气 | 同一句话录 3 种语气，检查 `<user:…>` 与回答差异 | M2a | 方案 C（直接出语音时语气理解通常更充分）或方案 A |
 | V6 | 同厂商 TTS 是否有同一音色、支持哪些情感参数、是否返回时间戳 | 查文档 + 试合成同一句的多种情感 | M2a | 换厂商组合（实时模型与 TTS 分属两家） |
 | V7 | 实时接口是否提供用户输入转写事件（用于记忆与离线一致性） | 试接 | M2a | 端侧 `SpeechTranscriber` 并行转写 |
 | V8 | 外放下回声消除效果；误打断率 | 支架外放连续 10 轮 + 播放中插话测试 | M2b | 降低外放音量 / 半双工（播放时关闭闸门，只靠按钮打断） |
 | V9 | 视线软闸门对电视/旁人说话的过滤效果 | 电视背景声下 5 分钟不看屏幕 | M2b | 提高阈值 / M3 评估个人声纹确认 |
-| V10 | VRM → USDZ 后 52 个 blendShape 与动作能否在 RealityKit 中驱动 | 选一个 Perfect Sync 模型走完整管线 | M1 第一周 | 自建简化模型 / Live2D |
+| V10 | VRM → USDZ 后 52 个 blendShape 与动作能否在 RealityKit 中驱动 | 选一个 Perfect Sync 模型走完整管线 | M1（✅ 已测） | 自建简化模型 / Live2D（无需启用） |
 | V11 | `userFaceTrackingEnabled` 下前置人脸追踪的质量与帧率 | 与 `ARFaceTrackingConfiguration` 对比 | 进入看图功能前 | 看图时短暂切换 session |
 | V12 | 付费账号 `increased-memory-limit` 的实际可用内存上限（会员已购，前提解决） | 在 Xcode 中添加该能力并签名 | M4 启动时（仅走 MLX 时） | 只用 ≤ 1.7B 模型 |
+
+#### 已完成实测结论摘要
+
+**M0 探测（2026-11-20，001 M0；iPhone 16 Pro Max 国行 CH/A / iOS 27.2）**：
+
+- **V1 ✅ 已测**：`deviceNotEligible`——国行型号硬屏蔽 Apple Intelligence，M0 结论为本机 FM 不可用（退路生效）。
+- **V2 ✅ 已测**：zh_CN 支持且资源已安装（zh_TW/zh_HK/zh_CN 均支持，已装 zh_TW、zh_CN）。
+- **V3 部分已测**：`SpeechDetector` 可构造并加入 `SpeechAnalyzer`；误开率/效果仍待 M2b 实测。
+- **NLEmbedding 简体句向量**（非 V 表条目，但属 V1 退路依赖项）：**可用**（v3.4 复核推翻 v3.3 的"返回 nil"）。iOS 27.2 上同一进程内首次 `sentenceEmbedding(for:)` 会返回 nil，需重试或改用 `sentenceEmbedding(for:revision:)`。区分度弱：3 组近/远义句只有 2 组排序正确（"我有点难过"离"明天要开会"比离"心情不太好"更近），且近义句距离 0.37–0.49 → 离线意图匹配仍以关键词 + CreateML 为主，embedding 只作辅助层，阈值须实测。`NLContextualEmbedding` 中文模型（512 维）**可用**：进程内首次 `load()` 会失败（`hasAvailableAssets` 同时误报 false），但**不是固定延迟**——先等 300 ms 再首次调用仍 5/5 失败，首次失败后 50–100 ms 重试即成功（5/5）；`requestAssets()` 首次可达 5.5 s，诊断不使用。详见 001 research.md。
+- **ARKit 人脸追踪**：`isSupported = true`（预期）。
+
+**M1 实测（2026-11-25–2026-11-27，002 M1；iPhone 16 Pro Max / iOS 27.2）**：
+
+- **V10 ✅ 已测**：52/52 ARKit 形态键与 8/8 动作片段在真机全部验证通过（采用单条 `SkelAnimation` 时间线 + `actions.json` + 运行时 `trimmed` 裁剪、头部 `ModelEntity.jointTransforms` 直驱、PBR 灯光/贴图调优），无需启用自建模型或 Live2D 退路。
+- **M1 稳定性（SC-006）✅ 已测**：独立 `ARSession` + 12 Hz Vision 手势 + `RealityView` 连续运行 10 分钟（Release），实测 `avg 59.95 fps`、`max 518.2 MiB`、全程 `nominal` 零升温、`ARSession` 中断 `0` 次。详见 `specs/002-m1-presence/research.md`。
 
 ---
 
@@ -502,3 +513,4 @@ M1 与 M2 可以并行；M1 不应跳过，它是产品体验的地基。
 | v3.4 | 复核 NLEmbedding：v3.3 的"返回 nil"是首次调用的系统怪癖（重试或指定 revision 即可加载），简体句向量可用；但区分度弱（3 组中 1 组排序颠倒），离线意图匹配仍以关键词 + CreateML 为主、embedding 降为辅助层；新增 `NLContextualEmbedding` 探测（模型已在设备上；进程早期首次加载失败，延迟约 300 ms 重试即可）；修复文档状态行的表格断裂 |
 | v3.5 | 真机 A/B 复核 `NLContextualEmbedding` 的"延迟重试"：首次 `load()` 失败是进程内首次查询触发资源初始化的一次性状态，先等 300 ms 再首次调用仍 5/5 失败；首次失败后 50–100 ms 重试即成功（5/5），无需固定 300 ms。`requestAssets()` 首次实测 5.5 s（可能触发资源检查/下载），诊断不使用；探测器改为 100 ms 退避、2 s 截止。详见 001 research.md |
 | v3.6 | 新增 005 语音拍照：在 4.12 注明前置自拍不属于"看图"（不上传、不进模型）；取帧方式待 005 US1 实测后回写 |
+| v3.7 | M1（002）收尾实测回写：修复 §9.2 表格断裂；回写 V10 通过与三项实测修正（单条时间线 + `actions.json`、`jointTransforms` 直驱、PBR 调优暂无需 `ShaderGraphMaterial`）；补充 ARKit `_L`/`_R` 键名规范化、手势规则法达标、D5/快速靠近调参、SC-006 10 分钟实测（59.95 fps / 518.2 MiB / 全程 `nominal`）与第 5 章现行契约指引 |

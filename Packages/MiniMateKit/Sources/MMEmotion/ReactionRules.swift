@@ -21,9 +21,11 @@ public struct ReactionRules: Sendable, Equatable {
     public var attendingEnter: TimeInterval
     /// 人脸丢失多久后回到 Idle。
     public var idleAfterFaceLost: TimeInterval
-    /// 判定"快速靠近"的时间窗，窗内距离缩短超过 `approachDistance` 即触发。
+    /// 判定"快速靠近"的时间窗，窗内距离缩短超过 `approachDistance` 且最终距离 `<= approachMaxDistance` 即触发。
     public var approachWindow: TimeInterval
     public var approachDistance: Float
+    /// 判定"快速靠近"的近距门槛（米）：仅当用户最终凑近至该距离以内才触发后仰，避免远距离前倾坐正误触。
+    public var approachMaxDistance: Float
 
     public init(
         reactionDelay: ClosedRange<TimeInterval> = 0.3...0.8,
@@ -31,8 +33,9 @@ public struct ReactionRules: Sendable, Equatable {
         cooldown: TimeInterval = 8,
         attendingEnter: TimeInterval = 0.2,
         idleAfterFaceLost: TimeInterval = 3,
-        approachWindow: TimeInterval = 1,
-        approachDistance: Float = 0.10
+        approachWindow: TimeInterval = 0.6,
+        approachDistance: Float = 0.14,
+        approachMaxDistance: Float = 0.38
     ) {
         self.reactionDelay = reactionDelay
         self.reactionDuration = reactionDuration
@@ -41,6 +44,7 @@ public struct ReactionRules: Sendable, Equatable {
         self.idleAfterFaceLost = idleAfterFaceLost
         self.approachWindow = approachWindow
         self.approachDistance = approachDistance
+        self.approachMaxDistance = approachMaxDistance
     }
 
     public static let defaults = ReactionRules()

@@ -2,6 +2,9 @@ import Foundation
 import Observation
 import RealityKit
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 import MMCore
 import MMAvatar
 import MMEmotion
@@ -60,6 +63,15 @@ final class AvatarScene {
     private(set) var mirrorCheckSampleCount: Int = 0
     private(set) var lastMirrorReport: MirrorCorrelationReport?
 
+    // SC-006 10 分钟稳定性压测只读观测
+    private(set) var isRunningStabilityTest: Bool = false
+    private(set) var stabilityElapsed: TimeInterval = 0
+    let stabilityTargetDuration: TimeInterval = 600.0
+    private(set) var stabilitySampleCount: Int = 0
+    private(set) var currentFps: Double = 0
+    private(set) var currentMemoryMB: Double = 0
+    private(set) var lastStabilityReport: StabilityReport?
+
     // US4 手势与热状态只读观测（3A）
     private(set) var lastGestureEvent: GestureEvent?
     private(set) var gestureEventCounts: [GestureKind: Int] = [:]
@@ -107,6 +119,10 @@ final class AvatarScene {
     @ObservationIgnored private var mirrorCheckPairs: [(user: [String: Float], avatar: [String: Float])] = []
     @ObservationIgnored private var recordedFrames: [PerceptionFeatures] = []
     @ObservationIgnored private var isDebugPanelPresented = false
+    @ObservationIgnored private var isSceneActive = true
+    @ObservationIgnored private var stabilityRecorder = StabilitySessionRecorder()
+    @ObservationIgnored private var lastObservedSessionInterruptions: Int = 0
+    @ObservationIgnored private var lastObservedThermalSessionInterruptions: Int = 0
 
     private var canMeasureTrackLatency: Bool {
         currentStateKind == .attending && playingAction == nil && !isDebugPanelPresented
@@ -234,6 +250,12 @@ final class AvatarScene {
 
     // MARK: - 感知生命周期
 
+    private func setIdleTimerDisabled(_ disabled: Bool) {
+        #if os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = disabled
+        #endif
+    }
+
     func startPerception() async {
         #if DEBUG
         if debugFreezeIdle { return }
@@ -277,6 +299,9 @@ final class AvatarScene {
             return
         }
 
+        if isSceneActive {
+            setIdleTimerDisabled(true)
+        }
         perceptionTask = Task { [weak self] in
             for await features in stream {
                 guard let self, !Task.isCancelled, self.perceptionGeneration == generation else { break }
@@ -303,6 +328,10 @@ final class AvatarScene {
     }
 
     func stopPerception() {
+        setIdleTimerDisabled(false)
+        if isRunningStabilityTest {
+            stopStabilityTest()
+        }
         perceptionGeneration &+= 1
         isStartingPerception = false
         perceptionTask?.cancel()
@@ -332,6 +361,11 @@ final class AvatarScene {
     }
 
     func handleBackground() async {
+        isSceneActive = false
+        setIdleTimerDisabled(false)
+        if isRunningStabilityTest {
+            stopStabilityTest()
+        }
         poseTask?.cancel()
         poseTask = nil
         mouthSimulationTask?.cancel()
@@ -366,8 +400,115 @@ final class AvatarScene {
         }
     }
 
+    func handleForeground() async {
+        isSceneActive = true
+        if perceptionTask != nil {
+            setIdleTimerDisabled(true)
+        } else {
+            await startPerception()
+        }
+    }
+
     func setDebugPanelPresented(_ presented: Bool) {
         isDebugPanelPresented = presented
+        if isRunningStabilityTest {
+            let now = clock.now.timeIntervalSinceReferenceDate
+            if presented {
+                stabilityRecorder.pause(at: now)
+            } else {
+                stabilityRecorder.resume(at: now)
+            }
+        }
+    }
+
+    // MARK: - SC-006 稳定性压测（10 分钟）
+
+    func startStabilityTest() {
+        let now = clock.now.timeIntervalSinceReferenceDate
+        stabilityRecorder = StabilitySessionRecorder(targetDuration: stabilityTargetDuration)
+        stabilityRecorder.start(at: now, initialThermalLevel: StabilityThermalLevel(thermalState))
+        #if os(iOS)
+        if let arkitSource = perceptionSource as? ARKitPerceptionSource {
+            lastObservedSessionInterruptions = arkitSource.sessionInterruptionCount
+            lastObservedThermalSessionInterruptions = arkitSource.thermalSessionInterruptionCount
+        } else {
+            lastObservedSessionInterruptions = 0
+            lastObservedThermalSessionInterruptions = 0
+        }
+        #else
+        lastObservedSessionInterruptions = 0
+        lastObservedThermalSessionInterruptions = 0
+        #endif
+        if isDebugPanelPresented {
+            stabilityRecorder.pause(at: now)
+        }
+        lastStabilityReport = nil
+        stabilityElapsed = 0
+        stabilitySampleCount = 0
+        currentFps = 0
+        currentMemoryMB = 0
+        isRunningStabilityTest = true
+    }
+
+    func stopStabilityTest() {
+        guard isRunningStabilityTest else { return }
+        syncARKitStabilityState(at: clock.now.timeIntervalSinceReferenceDate)
+        let report = stabilityRecorder.finish()
+        lastStabilityReport = report
+        stabilityElapsed = report.duration
+        stabilitySampleCount = report.sampleCount
+        isRunningStabilityTest = false
+    }
+
+    /// 统一同步 ARKit 热状态、中断态与中断计数增量（避免中断期间无新帧时漏记或恢复降温后误判热态中断）。
+    private func syncARKitStabilityState(at timestamp: TimeInterval) {
+        #if os(iOS)
+        if let arkitSource = perceptionSource as? ARKitPerceptionSource {
+            let latestThermal = arkitSource.currentThermalState
+            if thermalState != latestThermal {
+                thermalState = latestThermal
+            }
+            let latestGestureHz = arkitSource.effectiveGestureRateHz
+            if effectiveGestureRateHz != latestGestureHz {
+                effectiveGestureRateHz = latestGestureHz
+            }
+            if arkitSource.isSessionInterrupted, isFaceTracked {
+                isFaceTracked = false
+            }
+            let totalCount = arkitSource.sessionInterruptionCount
+            let thermalCount = arkitSource.thermalSessionInterruptionCount
+            if totalCount > lastObservedSessionInterruptions {
+                let totalDelta = totalCount - lastObservedSessionInterruptions
+                let thermalDelta = max(0, min(totalDelta, thermalCount - lastObservedThermalSessionInterruptions))
+                let nonThermalDelta = totalDelta - thermalDelta
+                if isRunningStabilityTest {
+                    let currentThermal = StabilityThermalLevel(thermalState)
+                    let thermalLevelForInterrupt = max(currentThermal, .serious)
+                    for _ in 0..<thermalDelta {
+                        stabilityRecorder.recordSessionInterruption(at: timestamp, thermalLevel: thermalLevelForInterrupt)
+                    }
+                    for _ in 0..<nonThermalDelta {
+                        stabilityRecorder.recordSessionInterruption(at: timestamp, thermalLevel: .nominal)
+                    }
+                }
+                lastObservedSessionInterruptions = totalCount
+                lastObservedThermalSessionInterruptions = thermalCount
+            } else if totalCount < lastObservedSessionInterruptions {
+                lastObservedSessionInterruptions = totalCount
+                lastObservedThermalSessionInterruptions = thermalCount
+            }
+        }
+        #endif
+    }
+
+    func clearStabilityTest() {
+        stabilityRecorder.reset()
+        lastStabilityReport = nil
+        stabilityElapsed = 0
+        stabilitySampleCount = 0
+        currentFps = 0
+        currentMemoryMB = 0
+        isRunningStabilityTest = false
     }
 
     func handleScreenDisappear() {
@@ -409,10 +550,9 @@ final class AvatarScene {
         }
         #if os(iOS)
         if let arkitSource = perceptionSource as? ARKitPerceptionSource {
-            thermalState = arkitSource.currentThermalState
-            effectiveGestureRateHz = arkitSource.effectiveGestureRateHz
             detectedHandCount = arkitSource.lastDetectedHandCount
             lastGestureDiagnostics = arkitSource.lastGestureDiagnostics
+            syncARKitStabilityState(at: features.timestamp)
         } else {
             let currentThermal = ProcessInfo.processInfo.thermalState
             thermalState = currentThermal
@@ -946,6 +1086,25 @@ final class AvatarScene {
         renderer.apply(pose)
         playingAction = renderer.playingAction
 
+        if isRunningStabilityTest, !isDebugPanelPresented {
+            syncARKitStabilityState(at: now)
+            if let sample = stabilityRecorder.recordFrame(
+                at: now,
+                thermalLevel: StabilityThermalLevel(thermalState),
+                effectiveGestureRateHz: effectiveGestureRateHz,
+                isFaceTracked: isFaceTracked,
+                memoryMBProvider: { ProcessMemory.physicalFootprintMB() }
+            ) {
+                currentFps = sample.fps
+                currentMemoryMB = sample.memoryMB
+                stabilityElapsed = sample.elapsed
+                stabilitySampleCount = stabilityRecorder.samples.count
+                if stabilityRecorder.elapsed + 1e-9 >= stabilityTargetDuration {
+                    stopStabilityTest()
+                }
+            }
+        }
+
         if !freezeIdle, canMeasureTrackLatency {
             if let sample = trackLatencyTracker.observeAppliedHeadRotation(headRotation, at: now) {
                 latencyRecorder.record(sample, metric: "M_track")
@@ -1016,7 +1175,7 @@ struct AvatarScreen: View {
                 }
             } else if newPhase == .active {
                 Task {
-                    await scene.startPerception()
+                    await scene.handleForeground()
                 }
             }
         }
@@ -1043,6 +1202,23 @@ struct AvatarScreen: View {
                         .monospacedDigit()
                         Button("结束") {
                             scene.stopMirrorCheck()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                    }
+                    .font(.footnote)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.thinMaterial, in: Capsule())
+                }
+                if scene.isRunningStabilityTest {
+                    HStack(spacing: 8) {
+                        Image(systemName: "gauge.with.dots.needle.67percent")
+                            .foregroundStyle(.blue)
+                        Text(stabilityCapsuleText)
+                            .monospacedDigit()
+                        Button("结束") {
+                            scene.stopStabilityTest()
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
@@ -1109,6 +1285,25 @@ struct AvatarScreen: View {
         }
         .navigationTitle("小瓜")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var stabilityCapsuleText: String {
+        let clamped = min(scene.stabilityElapsed, scene.stabilityTargetDuration)
+        let elapsedMin = Int(clamped) / 60
+        let elapsedSec = Int(clamped) % 60
+        let targetMin = Int(scene.stabilityTargetDuration) / 60
+        let targetSec = Int(scene.stabilityTargetDuration) % 60
+        let thermalName = StabilityThermalLevel(scene.thermalState).rawValue
+        return String(
+            format: "稳定性 %02d:%02d / %02d:%02d · %.1f fps · %.0f MB · %@",
+            elapsedMin,
+            elapsedSec,
+            targetMin,
+            targetSec,
+            scene.currentFps,
+            scene.currentMemoryMB,
+            thermalName
+        )
     }
 }
 

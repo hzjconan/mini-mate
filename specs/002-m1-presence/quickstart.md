@@ -58,11 +58,11 @@ swift test --filter "MMEmotionTests|MMPerceptionTests|MMCoreTests"
 
 ## 验收清单
 
-- [ ] SC-001 素材全部可驱动
-- [ ] SC-002 M_track p50 < 100 ms、p90 < 150 ms
-- [ ] SC-003 M_reflex 区间命中率 ≥ 90%
-- [ ] SC-004 相关系数 < 0.3
-- [ ] SC-005 手势 ≥ 8/10，误触发 ≤ 1 次/分钟
-- [ ] SC-006 10 分钟 ≥ 55 fps、内存 < 1 GB
-- [ ] SC-007 主观："它在看我，且在回应我"
-- [ ] 实测数据已写入 `research.md`
+- [x] SC-001 素材全部可驱动
+- [x] SC-002 M_track p50 < 100 ms、p90 < 150 ms（真机交互验收通过，精确统计值与口径说明已写入 `research.md`）
+- [x] SC-003 M_reflex 区间命中率 ≥ 90%（真机 US3 验收通过，两组精确统计值已写入 `research.md`）
+- [x] SC-004 相关系数 < 0.3（自动化 1800 帧 `< 0.3` 通过，真机 30 s `meanAbsR = 0.1248` 与通道说明已写入 `research.md`）
+- [x] SC-005 手势 ≥ 8/10，误触发 ≤ 1 次/分钟
+- [x] SC-006 10 分钟 ≥ 55 fps、内存 < 1 GB（实测 avg 59.95 fps、max 518.2 MiB、全程 nominal）
+- [x] SC-007 主观："它在看我，且在回应我"
+- [x] 实测数据已写入 `research.md`

@@ -150,9 +150,9 @@ description: "M1 感知与形象的任务列表"
 
 ## Phase 8: Polish
 
-- [ ] T048 真机执行 quickstart 第六节（SC-006），必要时优化（降低贴图、减少面数、手势降频）
-- [ ] T049 主观验收 SC-007；全部实测数据写入 `research.md`
-- [ ] T050 [P] 若实测推翻 tech-selection 中的假设（如素材管线、阈值），同步修订 `docs/tech-selection.md`
+- [x] T048 真机执行 quickstart 第六节（SC-006），必要时优化（降低贴图、减少面数、手势降频）（2026-11-27 真机 Release 10 分钟压测通过：avg 59.95 fps / max 518.2 MiB / 全程 nominal / 0 中断；同步落地形象页防自动锁屏、SC-006 压测遥测与快速靠近后仰防误触调优）
+- [x] T049 主观验收 SC-007；全部实测数据写入 `research.md`（2026-11-27 主观验收合格，全量实测数据已回写 `research.md`）
+- [x] T050 [P] 若实测推翻 tech-selection 中的假设（如素材管线、阈值），同步修订 `docs/tech-selection.md`（2026-11-27 已修订并升至 v3.7）
 
 ---
 
