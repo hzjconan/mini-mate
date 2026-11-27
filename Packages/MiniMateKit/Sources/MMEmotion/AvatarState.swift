@@ -17,17 +17,25 @@ public struct Reaction: Sendable, Equatable {
     public let action: ActionTag?
     public let duration: Duration
     public let returnTo: AvatarStateKind
+    /// 是否来自 `assistantCue`（EM-1–EM-5）：为 true 时不可被感知反应打断，且不写入感知冷却。
+    public let isCue: Bool
+    /// 提示是否保持到下一个 `assistantCue` 或 `assistantCueEnded`（EM-4）。
+    public let holdsUntilEnded: Bool
 
     public init(
         expression: EmotionTag,
         action: ActionTag? = nil,
         duration: Duration = .milliseconds(1500),
-        returnTo: AvatarStateKind
+        returnTo: AvatarStateKind,
+        isCue: Bool = false,
+        holdsUntilEnded: Bool = false
     ) {
         self.expression = expression
         self.action = action
         self.duration = duration
         self.returnTo = returnTo
+        self.isCue = isCue
+        self.holdsUntilEnded = holdsUntilEnded
     }
 }
 
@@ -53,6 +61,8 @@ public struct AvatarState: Sendable, Equatable {
     public let cooldowns: [ReactionKey: TimeInterval]
     public let scheduled: [ScheduledReaction]
     public let lastFaceSeenAt: TimeInterval?
+    /// 当前保持中（或对话期间暂存待恢复）的形象提示（EM-2、EM-4、EM-5）。
+    public let heldCue: AvatarCue?
 
     public init(
         kind: AvatarStateKind = .idle,
@@ -60,7 +70,8 @@ public struct AvatarState: Sendable, Equatable {
         baseEmotion: EmotionTag = .neutral,
         cooldowns: [ReactionKey: TimeInterval] = [:],
         scheduled: [ScheduledReaction] = [],
-        lastFaceSeenAt: TimeInterval? = nil
+        lastFaceSeenAt: TimeInterval? = nil,
+        heldCue: AvatarCue? = nil
     ) {
         self.kind = kind
         self.enteredAt = enteredAt
@@ -68,5 +79,6 @@ public struct AvatarState: Sendable, Equatable {
         self.cooldowns = cooldowns
         self.scheduled = scheduled
         self.lastFaceSeenAt = lastFaceSeenAt
+        self.heldCue = heldCue
     }
 }

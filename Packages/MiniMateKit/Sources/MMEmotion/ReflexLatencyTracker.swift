@@ -72,6 +72,7 @@ public struct ReflexLatencyTracker: Sendable, Equatable {
         }
 
         guard case .reacting(let reaction) = stateKind,
+              !reaction.isCue,
               reaction.action == nil,
               reaction.expression == current.expectedEmotion
         else {

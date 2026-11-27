@@ -35,6 +35,12 @@ final class AvatarScene {
     // MARK: - 感知、状态机与指标可观察状态
 
     private(set) var currentStateKind: AvatarStateKind = .idle
+    private(set) var currentBaseEmotion: EmotionTag = .neutral
+    private(set) var currentHeldCue: AvatarCue?
+    private(set) var debugAudioLevel: Float = 0
+    private(set) var isSimulatingSpeechMouth: Bool = false
+    /// 调试选项（2A）：主界面底部悬浮对话调试条，默认关闭。
+    var showConversationOverlay: Bool = false
     private(set) var isFaceTracked: Bool = false
     private(set) var isLookingAtScreen: Bool = false
     private(set) var latestFacePosition: SIMD3<Float>?
@@ -85,8 +91,18 @@ final class AvatarScene {
     @ObservationIgnored private var cooldownSyncTask: Task<Void, Never>?
     @ObservationIgnored private var latestPose = AvatarPose()
     @ObservationIgnored private var pendingStateMachineAction: ActionCommand?
+    private enum ConversationQueueItem {
+        case event(ConversationEvent)
+        case reset
+    }
+
     @ObservationIgnored private var trackLatencyTracker = TrackLatencyTracker()
     @ObservationIgnored private var reflexLatencyTracker = ReflexLatencyTracker()
+    @ObservationIgnored private var feedbackLatencyTracker = FeedbackLatencyTracker()
+    @ObservationIgnored private var pendingConversationItems: [ConversationQueueItem] = []
+    @ObservationIgnored private var conversationEventTask: Task<Void, Never>?
+    @ObservationIgnored private var conversationQueueGeneration: UInt64 = 0
+    @ObservationIgnored private var mouthSimulationTask: Task<Void, Never>?
     @ObservationIgnored private var mirrorCheckStartedAt: TimeInterval?
     @ObservationIgnored private var mirrorCheckPairs: [(user: [String: Float], avatar: [String: Float])] = []
     @ObservationIgnored private var recordedFrames: [PerceptionFeatures] = []
@@ -274,6 +290,8 @@ final class AvatarScene {
                 guard !Task.isCancelled, self.perceptionGeneration == generation else { break }
                 self.latestPose = pose
                 self.currentStateKind = state.kind
+                self.currentBaseEmotion = state.baseEmotion
+                self.currentHeldCue = state.heldCue
                 self.latestHeadRotation = pose.headRotation
                 self.latestEyeTarget = pose.eyeTarget
                 if let cmd = pose.action {
@@ -292,6 +310,14 @@ final class AvatarScene {
         perceptionSource?.stop()
         poseTask?.cancel()
         poseTask = nil
+        mouthSimulationTask?.cancel()
+        mouthSimulationTask = nil
+        isSimulatingSpeechMouth = false
+        debugAudioLevel = 0
+        conversationQueueGeneration &+= 1
+        conversationEventTask?.cancel()
+        conversationEventTask = nil
+        pendingConversationItems.removeAll()
         isFaceTracked = false
         isLookingAtScreen = false
         latestFacePosition = nil
@@ -299,6 +325,7 @@ final class AvatarScene {
         detectedHandCount = 0
         trackLatencyTracker.reset()
         reflexLatencyTracker.reset()
+        feedbackLatencyTracker.reset()
         if isRunningMirrorCheck {
             stopMirrorCheck()
         }
@@ -307,11 +334,21 @@ final class AvatarScene {
     func handleBackground() async {
         poseTask?.cancel()
         poseTask = nil
+        mouthSimulationTask?.cancel()
+        mouthSimulationTask = nil
+        isSimulatingSpeechMouth = false
+        debugAudioLevel = 0
+        conversationQueueGeneration &+= 1
+        conversationEventTask?.cancel()
+        conversationEventTask = nil
+        pendingConversationItems.removeAll()
         let now = clock.now.timeIntervalSinceReferenceDate
         if let ruleBased = stateMachine as? RuleBasedEmotionStateMachine {
             await ruleBased.resetToIdle(at: now)
         }
         currentStateKind = .idle
+        currentBaseEmotion = .neutral
+        currentHeldCue = nil
         isFaceTracked = false
         isLookingAtScreen = false
         latestFacePosition = nil
@@ -323,6 +360,7 @@ final class AvatarScene {
         pendingStateMachineAction = nil
         trackLatencyTracker.reset()
         reflexLatencyTracker.reset()
+        feedbackLatencyTracker.reset()
         if isRunningMirrorCheck {
             stopMirrorCheck()
         }
@@ -444,6 +482,163 @@ final class AvatarScene {
         latencyRecorder = LatencyRecorder()
         trackLatencyTracker.reset()
         reflexLatencyTracker.reset()
+        feedbackLatencyTracker.reset()
+    }
+
+    // MARK: - US5 对话事件注入、口型模拟与 M_feedback
+
+    func injectConversationEvent(_ event: ConversationEvent) {
+        switch event {
+        case .userSpeechStarted, .assistantSpeechEnded, .assistantCueEnded:
+            stopMouthSimulationWithoutInjecting()
+            pendingConversationItems.removeAll { item in
+                if case .event(.assistantAudioLevel) = item { return true }
+                return false
+            }
+        default:
+            break
+        }
+        enqueueConversationItem(.event(event))
+    }
+
+    private func enqueueConversationItem(_ item: ConversationQueueItem) {
+        pendingConversationItems.append(item)
+        guard conversationEventTask == nil else { return }
+        let generation = conversationQueueGeneration
+        conversationEventTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled,
+                  self.conversationQueueGeneration == generation,
+                  !self.pendingConversationItems.isEmpty
+            {
+                let nextItem = self.pendingConversationItems.removeFirst()
+                switch nextItem {
+                case .event(let event):
+                    await self.processConversationEvent(event, generation: generation)
+                case .reset:
+                    await self.processConversationReset(generation: generation)
+                }
+            }
+            if self.conversationQueueGeneration == generation {
+                self.conversationEventTask = nil
+            }
+        }
+    }
+
+    private func processConversationEvent(_ event: ConversationEvent, generation: UInt64) async {
+        switch event {
+        case .userSpeechEnded:
+            let injectedAt = clock.now.timeIntervalSinceReferenceDate
+            feedbackLatencyTracker.observeUserSpeechEnded(
+                previousState: currentStateKind,
+                at: injectedAt
+            )
+        case .userSpeechStarted:
+            feedbackLatencyTracker.reset()
+        default:
+            break
+        }
+
+        await stateMachine.handle(event)
+        guard !Task.isCancelled, conversationQueueGeneration == generation else { return }
+
+        let evalTime = clock.now.timeIntervalSinceReferenceDate
+        let pose = await stateMachine.pose(at: evalTime)
+        let state = await stateMachine.state
+        guard !Task.isCancelled, conversationQueueGeneration == generation else { return }
+
+        latestPose = pose
+        currentStateKind = state.kind
+        currentBaseEmotion = state.baseEmotion
+        currentHeldCue = state.heldCue
+        latestHeadRotation = pose.headRotation
+        latestEyeTarget = pose.eyeTarget
+        if let cmd = pose.action {
+            pendingStateMachineAction = cmd
+        }
+
+        if isDebugPanelPresented,
+           let sample = feedbackLatencyTracker.observeAppliedState(
+               state.kind,
+               at: clock.now.timeIntervalSinceReferenceDate
+           )
+        {
+            latencyRecorder.record(sample, metric: "M_feedback")
+        }
+    }
+
+    private func processConversationReset(generation: UInt64) async {
+        let now = clock.now.timeIntervalSinceReferenceDate
+        if let ruleBased = stateMachine as? RuleBasedEmotionStateMachine {
+            await ruleBased.resetToIdle(at: now)
+        }
+        guard !Task.isCancelled, conversationQueueGeneration == generation else { return }
+        let pose = await stateMachine.pose(at: now)
+        let state = await stateMachine.state
+        guard !Task.isCancelled, conversationQueueGeneration == generation else { return }
+        latestPose = pose
+        currentStateKind = state.kind
+        currentBaseEmotion = state.baseEmotion
+        currentHeldCue = state.heldCue
+        latestHeadRotation = pose.headRotation
+        latestEyeTarget = pose.eyeTarget
+        pendingStateMachineAction = nil
+    }
+
+    func injectSpeakingStart(emotion: EmotionTag) {
+        injectConversationEvent(.assistantSpeechStarted)
+        injectConversationEvent(.assistantEmotion(emotion))
+    }
+
+    func setDebugAudioLevel(_ level: Float) {
+        stopMouthSimulationWithoutInjecting()
+        let clamped = level.isFinite ? min(max(level, 0), 1) : 0
+        debugAudioLevel = clamped
+        injectConversationEvent(.assistantAudioLevel(clamped))
+    }
+
+    func setSimulatingSpeechMouth(_ enabled: Bool) {
+        if enabled {
+            guard !isSimulatingSpeechMouth else { return }
+            isSimulatingSpeechMouth = true
+            let startedAt = clock.now.timeIntervalSinceReferenceDate
+            mouthSimulationTask?.cancel()
+            mouthSimulationTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    guard let self, self.isSimulatingSpeechMouth else { break }
+                    let t = self.clock.now.timeIntervalSinceReferenceDate - startedAt
+                    // 复合正弦波形输出 0.05...0.85，模拟自然说话音节起伏
+                    let wave = 0.5
+                        + 0.30 * sin(t * 2.0 * .pi * 3.2)
+                        + 0.18 * sin(t * 2.0 * .pi * 7.1 + 0.8)
+                        + 0.12 * cos(t * 2.0 * .pi * 1.4)
+                    let level = Float(min(max(wave, 0.05), 0.85))
+                    self.debugAudioLevel = level
+                    self.injectConversationEvent(.assistantAudioLevel(level))
+                    try? await Task.sleep(for: .milliseconds(33))
+                }
+            }
+        } else {
+            stopMouthSimulationWithoutInjecting()
+            injectConversationEvent(.assistantAudioLevel(0))
+        }
+    }
+
+    func resetConversationState() {
+        stopMouthSimulationWithoutInjecting()
+        conversationQueueGeneration &+= 1
+        conversationEventTask?.cancel()
+        conversationEventTask = nil
+        pendingConversationItems.removeAll()
+        feedbackLatencyTracker.reset()
+        enqueueConversationItem(.reset)
+    }
+
+    private func stopMouthSimulationWithoutInjecting() {
+        mouthSimulationTask?.cancel()
+        mouthSimulationTask = nil
+        isSimulatingSpeechMouth = false
+        debugAudioLevel = 0
     }
 
     // MARK: - SC-004 镜像检测（30 s）与表情预设调参
@@ -691,6 +886,8 @@ final class AvatarScene {
                 }
                 self.latestPose = pose
                 self.currentStateKind = state.kind
+                self.currentBaseEmotion = state.baseEmotion
+                self.currentHeldCue = state.heldCue
                 self.latestHeadRotation = pose.headRotation
                 self.latestEyeTarget = pose.eyeTarget
                 if let cmd = pose.action {
@@ -760,6 +957,9 @@ final class AvatarScene {
         if !freezeIdle, !isDebugPanelPresented {
             if let reflexSample = reflexLatencyTracker.observeAppliedState(currentStateKind, at: now) {
                 latencyRecorder.record(reflexSample, metric: "M_reflex")
+            }
+            if let feedbackSample = feedbackLatencyTracker.observeAppliedState(currentStateKind, at: now) {
+                latencyRecorder.record(feedbackSample, metric: "M_feedback")
             }
         } else {
             reflexLatencyTracker.reset()
@@ -900,8 +1100,114 @@ struct AvatarScreen: View {
                 .padding()
             }
         }
+        .overlay(alignment: .bottom) {
+            if scene.showConversationOverlay {
+                ConversationDebugOverlay(scene: scene)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 72)
+            }
+        }
         .navigationTitle("小瓜")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct ConversationDebugOverlay: View {
+    let scene: AvatarScene
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(shortStateLabel)
+                    .font(.caption.monospaced().weight(.semibold))
+                    .lineLimit(1)
+                Text("底色:\(scene.currentBaseEmotion.rawValue)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                if let held = scene.currentHeldCue {
+                    Text("Cue:\(held.emotion.rawValue)\(held.hold ? "(H)" : "")")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button {
+                    scene.showConversationOverlay = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Button("开始说") {
+                        scene.injectConversationEvent(.userSpeechStarted)
+                    }
+                    Button("说完(M_fb)") {
+                        scene.injectConversationEvent(.userSpeechEnded)
+                    }
+                    Button("<user:sad>") {
+                        scene.injectConversationEvent(.userEmotion(.sad))
+                    }
+                    Button("开讲(gentle)") {
+                        scene.injectSpeakingStart(emotion: .gentle)
+                    }
+                    Button("开讲(happy)") {
+                        scene.injectSpeakingStart(emotion: .happy)
+                    }
+                    Button("讲完") {
+                        scene.injectConversationEvent(.assistantSpeechEnded)
+                    }
+                    Button(scene.isSimulatingSpeechMouth ? "停口型" : "口型模拟") {
+                        scene.setSimulatingSpeechMouth(!scene.isSimulatingSpeechMouth)
+                    }
+                    .tint(scene.isSimulatingSpeechMouth ? .orange : .accentColor)
+                    Button("Cue:问好(hold)") {
+                        scene.injectConversationEvent(.assistantCue(
+                            AvatarCue(emotion: .playful, action: .lookAround, hold: true)
+                        ))
+                    }
+                    Button("Cue:茄子(hold)") {
+                        scene.injectConversationEvent(.assistantCue(
+                            AvatarCue(emotion: .happy, action: .heart, hold: true)
+                        ))
+                    }
+                    Button("结束Cue") {
+                        scene.injectConversationEvent(.assistantCueEnded)
+                    }
+                    Button("重置") {
+                        scene.resetConversationState()
+                    }
+                    .tint(.red)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.thinMaterial, in: .rect(cornerRadius: 12))
+    }
+
+    private var shortStateLabel: String {
+        switch scene.currentStateKind {
+        case .idle: return "idle"
+        case .attending: return "attending"
+        case .listening: return "listening"
+        case .thinking: return "thinking"
+        case .speaking(let emotion): return "speaking(\(emotion.rawValue))"
+        case .reacting(let r):
+            if r.isCue {
+                let act = r.action.map { "/\($0.rawValue)" } ?? ""
+                return "cue(\(r.expression.rawValue)\(act)\(r.holdsUntilEnded ? ",H" : ""))"
+            }
+            if let action = r.action {
+                return "reacting(\(r.expression.rawValue)/\(action.rawValue))"
+            }
+            return "reacting(\(r.expression.rawValue))"
+        }
     }
 }
 

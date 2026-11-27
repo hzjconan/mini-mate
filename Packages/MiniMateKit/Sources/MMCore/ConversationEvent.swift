@@ -11,4 +11,10 @@ public enum ConversationEvent: Sendable, Equatable {
     case assistantSpeechEnded
     /// 0–1 音频电平，驱动口型。
     case assistantAudioLevel(Float)
+    /// 005：模型输出的 App 指令，情绪状态机忽略。
+    case assistantCommand(AssistantCommand)
+    /// 005：非对话轮次的形象提示（emotion-state-machine.md EM-1–EM-5）。
+    case assistantCue(AvatarCue)
+    /// 005：结束当前保持中的提示。
+    case assistantCueEnded
 }

@@ -4,14 +4,21 @@ import MMAvatar
 import MMEmotion
 import MMPerception
 
-/// 调试面板：状态与感知、镜像检测（SC-004）、录制导出、指标（M_track / M_reflex）、表情预设、动作点播与 52 个表情系数滑杆。
+/// 调试面板：状态与感知、对话事件注入（US5）、手势与热状态、镜像检测（SC-004）、录制导出、指标（M_track / M_reflex / M_feedback）、表情预设、动作点播与 52 个表情系数滑杆。
 struct AvatarDebugPanel: View {
     let scene: AvatarScene
+
+    @State private var selectedAssistantEmotion: EmotionTag = .gentle
+    @State private var selectedCueEmotion: EmotionTag = .playful
+    @State private var selectedCueAction: ActionTag? = .lookAround
+    @State private var cueHold: Bool = true
 
     var body: some View {
         List {
             Section("状态与感知") {
                 LabeledContent("状态", value: stateLabel(scene.currentStateKind))
+                LabeledContent("底色情绪", value: scene.currentBaseEmotion.rawValue)
+                LabeledContent("保持提示", value: formatHeldCue(scene.currentHeldCue))
                 LabeledContent("人脸追踪", value: scene.isFaceTracked ? "已追踪" : "未追踪")
                 LabeledContent("注视屏幕", value: scene.isLookingAtScreen ? "是" : "否")
                 LabeledContent(
@@ -35,6 +42,182 @@ struct AvatarDebugPanel: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
+            }
+
+            Section("对话事件注入（US5）") {
+                Toggle(
+                    "主界面悬浮对话调试条",
+                    isOn: Binding(
+                        get: { scene.showConversationOverlay },
+                        set: { scene.showConversationOverlay = $0 }
+                    )
+                )
+
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 8) {
+                    Button("用户开始说话") {
+                        scene.injectConversationEvent(.userSpeechStarted)
+                    }
+                    Button("用户结束说话（记 M_feedback）") {
+                        scene.injectConversationEvent(.userSpeechEnded)
+                    }
+                    Button("助手开始说话") {
+                        scene.injectConversationEvent(.assistantSpeechStarted)
+                    }
+                    Button("助手结束说话") {
+                        scene.injectConversationEvent(.assistantSpeechEnded)
+                    }
+                    Button("重置回 Idle", role: .destructive) {
+                        scene.resetConversationState()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .padding(.vertical, 2)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("用户语气 <user:…>（Thinking 态生效）")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 88))], spacing: 6) {
+                        ForEach(UserEmotion.allCases, id: \.self) { userEmotion in
+                            Button(userEmotionLabel(userEmotion)) {
+                                scene.injectConversationEvent(.userEmotion(userEmotion))
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("助手情绪 <emo:…>", selection: $selectedAssistantEmotion) {
+                        ForEach(EmotionTag.allCases, id: \.self) { emotion in
+                            Text("\(emotionLabel(emotion)) (\(emotion.rawValue))").tag(emotion)
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        Button("注入 <emo>") {
+                            scene.injectConversationEvent(.assistantEmotion(selectedAssistantEmotion))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+
+                        Button("开始说话 + 该情绪") {
+                            scene.injectSpeakingStart(emotion: selectedAssistantEmotion)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("助手动作 <act:…>（高优先级，不改状态）")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 88))], spacing: 6) {
+                        ForEach(ActionTag.allCases, id: \.self) { action in
+                            Button(actionLabel(action)) {
+                                scene.injectConversationEvent(.assistantAction(action))
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("口型电平 (assistantAudioLevel)")
+                            .font(.caption)
+                        Spacer()
+                        Text(String(format: "%.2f", scene.debugAudioLevel))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { Double(scene.debugAudioLevel) },
+                            set: { scene.setDebugAudioLevel(Float($0)) }
+                        ),
+                        in: 0...1
+                    )
+                    Toggle(
+                        "模拟说话口型（30 Hz）",
+                        isOn: Binding(
+                            get: { scene.isSimulatingSpeechMouth },
+                            set: { scene.setSimulatingSpeechMouth($0) }
+                        )
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("形象提示（assistantCue / 005 EM-1–EM-5）")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("提示表情", selection: $selectedCueEmotion) {
+                        ForEach(EmotionTag.allCases, id: \.self) { emotion in
+                            Text("\(emotionLabel(emotion)) (\(emotion.rawValue))").tag(emotion)
+                        }
+                    }
+                    Picker("提示动作", selection: $selectedCueAction) {
+                        Text("无动作").tag(Optional<ActionTag>.none)
+                        ForEach(ActionTag.allCases, id: \.self) { action in
+                            Text("\(actionLabel(action)) (\(action.rawValue))").tag(Optional(action))
+                        }
+                    }
+                    Toggle("持续保持（hold）", isOn: $cueHold)
+
+                    HStack(spacing: 8) {
+                        Button("发送 assistantCue") {
+                            scene.injectConversationEvent(.assistantCue(
+                                AvatarCue(
+                                    emotion: selectedCueEmotion,
+                                    action: selectedCueAction,
+                                    hold: cueHold
+                                )
+                            ))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+
+                        Button("发送 assistantCueEnded") {
+                            scene.injectConversationEvent(.assistantCueEnded)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+
+                    Text("005 预设快捷触发")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 6) {
+                        Button("问好 playful/lookAround/hold") {
+                            scene.injectConversationEvent(.assistantCue(
+                                AvatarCue(emotion: .playful, action: .lookAround, hold: true)
+                            ))
+                        }
+                        Button("茄子 happy/heart/hold") {
+                            scene.injectConversationEvent(.assistantCue(
+                                AvatarCue(emotion: .happy, action: .heart, hold: true)
+                            ))
+                        }
+                        Button("庆祝 happy/spin/单次") {
+                            scene.injectConversationEvent(.assistantCue(
+                                AvatarCue(emotion: .happy, action: .spin, hold: false)
+                            ))
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                Button("指令忽略验证（发送 .assistantCommand(.photo)）") {
+                    scene.injectConversationEvent(.assistantCommand(.photo))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
 
             Section("手势与热状态（US4 / SC-005）") {
@@ -170,9 +353,10 @@ struct AvatarDebugPanel: View {
                 }
             }
 
-            Section("指标（M_track / M_reflex）") {
+            Section("指标（M_track / M_reflex / M_feedback）") {
                 let trackCount = scene.latencyRecorder.count(for: "M_track")
                 let reflexCount = scene.latencyRecorder.count(for: "M_reflex")
+                let feedbackCount = scene.latencyRecorder.count(for: "M_feedback")
 
                 LabeledContent("M_track 样本数", value: "\(trackCount)")
                 LabeledContent("M_track p50", value: formatMilliseconds(scene.latencyRecorder.p50(for: "M_track")))
@@ -183,7 +367,11 @@ struct AvatarDebugPanel: View {
                 LabeledContent("M_reflex p90", value: formatMilliseconds(scene.latencyRecorder.p90(for: "M_reflex")))
                 LabeledContent("M_reflex 300–800 ms 命中率", value: formatReflexHitRate())
 
-                if trackCount > 0 || reflexCount > 0 {
+                LabeledContent("M_feedback 样本数", value: "\(feedbackCount)")
+                LabeledContent("M_feedback p50", value: formatMilliseconds(scene.latencyRecorder.p50(for: "M_feedback")))
+                LabeledContent("M_feedback p90", value: formatMilliseconds(scene.latencyRecorder.p90(for: "M_feedback")))
+
+                if trackCount > 0 || reflexCount > 0 || feedbackCount > 0 {
                     ShareLink(item: scene.metricsCSV()) {
                         Label("导出指标 CSV", systemImage: "square.and.arrow.up")
                     }
@@ -414,19 +602,40 @@ struct AvatarDebugPanel: View {
         }
     }
 
+    private func userEmotionLabel(_ emotion: UserEmotion) -> String {
+        switch emotion {
+        case .happy: "开心 (happy)"
+        case .calm: "平静 (calm)"
+        case .sad: "难过 (sad)"
+        case .tired: "疲惫 (tired)"
+        case .anxious: "焦虑 (anxious)"
+        case .angry: "生气 (angry)"
+        }
+    }
+
+    private func formatHeldCue(_ cue: AvatarCue?) -> String {
+        guard let cue else { return "none" }
+        let actionPart = cue.action.map { "/\($0.rawValue)" } ?? ""
+        return cue.hold ? "\(cue.emotion.rawValue)\(actionPart), hold" : "\(cue.emotion.rawValue)\(actionPart)"
+    }
+
     private func stateLabel(_ kind: AvatarStateKind) -> String {
         switch kind {
-        case .idle: "idle"
-        case .attending: "attending"
-        case .listening: "listening"
-        case .thinking: "thinking"
-        case .speaking(let emotion): "speaking(\(emotion.rawValue))"
+        case .idle: return "idle"
+        case .attending: return "attending"
+        case .listening: return "listening"
+        case .thinking: return "thinking"
+        case .speaking(let emotion): return "speaking(\(emotion.rawValue))"
         case .reacting(let reaction):
-            if let action = reaction.action {
-                "reacting(\(reaction.expression.rawValue)/\(action.rawValue))"
-            } else {
-                "reacting(\(reaction.expression.rawValue))"
+            let actionPart = reaction.action.map { "/\($0.rawValue)" } ?? ""
+            if reaction.isCue {
+                if reaction.holdsUntilEnded {
+                    return "reacting(cue:\(reaction.expression.rawValue)\(actionPart), hold)"
+                } else {
+                    return "reacting(cue:\(reaction.expression.rawValue)\(actionPart))"
+                }
             }
+            return "reacting(\(reaction.expression.rawValue)\(actionPart))"
         }
     }
 

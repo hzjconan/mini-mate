@@ -3,10 +3,20 @@ import simd
 import MMCore
 import MMPerception
 
-/// 基于规则的情绪与注意力状态机（US2 注意力追踪 + US3 语义表情反应、随机延迟队列、冷却与柔和底色增强、blendIn/blendOut 合成）。
+/// 基于规则的情绪与注意力状态机（US2 注意力追踪 + US3 语义表情反应 + US4 手势反应 + US5 对话状态与形象提示）。
 public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
     public static let maxHeadAngleRadians: Float = 25 * .pi / 180
+    public static let lipSyncJawOpenScale: Float = 0.80
+    public static let lipSyncMouthFunnelScale: Float = 0.35
+    public static let thinkingHeadPitchRadians: Float = -4 * .pi / 180
+    public static let thinkingHeadYawRadians: Float = 2 * .pi / 180
+    public static let thinkingEyeTarget = SIMD2<Float>(0.15, 0.45)
     private static let shyPitchOffsetRadians: Float = 8 * .pi / 180
+
+    private struct StoredCue: Sendable, Equatable {
+        let cue: AvatarCue
+        var actionPlayed: Bool
+    }
 
     private struct CooldownBoost: Sendable, Equatable {
         let emotion: EmotionTag
@@ -49,6 +59,12 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
     private var cooldownBoost: CooldownBoost?
     private var speakingOverlay: SpeakingOverlay?
     private var fadingLayers: [FadingLayer] = []
+
+    // US5 对话状态、形象提示与口型层状态
+    private var storedCue: StoredCue?
+    private var activeAudioLevel: Float?
+    private var pendingActionIsAssistant: Bool = false
+    private var hasActiveFaceSession: Bool = false
 
     // Idle 期间缓慢随机游走状态
     private var wanderStartYaw: Float = 0
@@ -106,13 +122,15 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
         wasFaceTracked = features.isFaceTracked
 
         if features.isFaceTracked {
+            hasActiveFaceSession = true
             currentState = AvatarState(
                 kind: currentState.kind,
                 enteredAt: currentState.enteredAt,
                 baseEmotion: currentState.baseEmotion,
                 cooldowns: currentState.cooldowns,
                 scheduled: currentState.scheduled,
-                lastFaceSeenAt: now
+                lastFaceSeenAt: now,
+                heldCue: storedCue?.cue
             )
             if let pos = features.facePosition,
                pos.x.isFinite, pos.y.isFinite, pos.z.isFinite {
@@ -149,7 +167,7 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             break
 
         case .listening, .thinking, .speaking:
-            // 对话事件完整转换留给 US5
+            // 对话态由 handle(_: ConversationEvent) 驱动转换；此处继续追踪人脸位置与感知触发
             break
         }
 
@@ -169,7 +187,232 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
     }
 
     public func handle(_ event: ConversationEvent) async {
-        // US5 实现对话事件转换，US3 保持无副作用空实现
+        let now = currentEventTime()
+        checkReactingExpiration(at: now)
+        pruneTransientLayers(at: now)
+
+        switch event {
+        case .userSpeechStarted:
+            snapshotCurrentReactingIfNeeded(at: now)
+            snapshotCurrentSpeakingIfNeeded(at: now)
+            activeReactionKey = nil
+            cooldownBoost = nil
+            speakingOverlay = nil
+            activeAudioLevel = nil
+            currentState = AvatarState(
+                kind: .listening,
+                enteredAt: now,
+                baseEmotion: currentState.baseEmotion,
+                cooldowns: currentState.cooldowns,
+                scheduled: [],
+                lastFaceSeenAt: currentState.lastFaceSeenAt,
+                heldCue: storedCue?.cue
+            )
+
+        case .userSpeechEnded:
+            let canTransition: Bool
+            switch currentState.kind {
+            case .listening:
+                canTransition = true
+            case .reacting(let r) where !r.isCue && Self.underlyingStateKind(of: r.returnTo) == .listening:
+                canTransition = true
+            default:
+                canTransition = false
+            }
+            guard canTransition else { return }
+            snapshotCurrentReactingIfNeeded(at: now)
+            activeReactionKey = nil
+            currentState = AvatarState(
+                kind: .thinking,
+                enteredAt: now,
+                baseEmotion: currentState.baseEmotion,
+                cooldowns: currentState.cooldowns,
+                scheduled: currentState.scheduled,
+                lastFaceSeenAt: currentState.lastFaceSeenAt,
+                heldCue: storedCue?.cue
+            )
+
+        case .userEmotion(let userEmotion):
+            guard !isCueActive, Self.underlyingStateKind(of: currentState.kind) == .thinking else {
+                return
+            }
+            currentState = AvatarState(
+                kind: currentState.kind,
+                enteredAt: currentState.enteredAt,
+                baseEmotion: Self.baseEmotion(for: userEmotion),
+                cooldowns: currentState.cooldowns,
+                scheduled: currentState.scheduled,
+                lastFaceSeenAt: currentState.lastFaceSeenAt,
+                heldCue: storedCue?.cue
+            )
+
+        case .assistantSpeechStarted:
+            let canStart: Bool
+            switch currentState.kind {
+            case .thinking, .listening:
+                canStart = true
+            case .reacting(let r) where !r.isCue:
+                let base = Self.underlyingStateKind(of: r.returnTo)
+                canStart = (base == .thinking || base == .listening)
+            default:
+                canStart = false
+            }
+            guard canStart else { return }
+            snapshotCurrentReactingIfNeeded(at: now)
+            activeReactionKey = nil
+            cooldownBoost = nil
+            speakingOverlay = nil
+            currentState = AvatarState(
+                kind: .speaking(currentState.baseEmotion),
+                enteredAt: now,
+                baseEmotion: currentState.baseEmotion,
+                cooldowns: currentState.cooldowns,
+                scheduled: [],
+                lastFaceSeenAt: currentState.lastFaceSeenAt,
+                heldCue: storedCue?.cue
+            )
+
+        case .assistantEmotion(let emotion):
+            guard case .speaking(let currentEmotion) = currentState.kind else { return }
+            guard currentEmotion != emotion else { return }
+            snapshotCurrentSpeakingIfNeeded(at: now)
+            currentState = AvatarState(
+                kind: .speaking(emotion),
+                enteredAt: now,
+                baseEmotion: currentState.baseEmotion,
+                cooldowns: currentState.cooldowns,
+                scheduled: currentState.scheduled,
+                lastFaceSeenAt: currentState.lastFaceSeenAt,
+                heldCue: storedCue?.cue
+            )
+
+        case .assistantSpeechEnded:
+            guard case .speaking = currentState.kind else { return }
+            snapshotCurrentSpeakingIfNeeded(at: now)
+            speakingOverlay = nil
+            activeAudioLevel = nil
+
+            if var held = storedCue {
+                let returnTo: AvatarStateKind = hasFacePresent(at: now) ? .attending : .idle
+                let reaction = Reaction(
+                    expression: held.cue.emotion,
+                    action: held.cue.action,
+                    duration: rules.reactionDuration,
+                    returnTo: returnTo,
+                    isCue: true,
+                    holdsUntilEnded: held.cue.hold
+                )
+                if !held.actionPlayed, let action = held.cue.action {
+                    setAssistantAction(action)
+                }
+                held.actionPlayed = true
+                if held.cue.hold {
+                    storedCue = held
+                } else {
+                    storedCue = nil
+                }
+                activeReactionKey = nil
+                currentState = AvatarState(
+                    kind: .reacting(reaction),
+                    enteredAt: now,
+                    baseEmotion: currentState.baseEmotion,
+                    cooldowns: currentState.cooldowns,
+                    scheduled: [],
+                    lastFaceSeenAt: currentState.lastFaceSeenAt,
+                    heldCue: storedCue?.cue
+                )
+            } else if hasFacePresent(at: now) {
+                enterAttendingFromConversationOrCue(at: now)
+            } else {
+                enterIdleQuietly(at: now)
+            }
+
+        case .assistantAction(let action):
+            setAssistantAction(action)
+
+        case .assistantAudioLevel(let rawLevel):
+            guard rawLevel.isFinite else { return }
+            let clamped = min(max(rawLevel, 0), 1)
+            if clamped > 0 {
+                activeAudioLevel = clamped
+            } else {
+                if case .speaking = currentState.kind {
+                    activeAudioLevel = 0
+                } else {
+                    activeAudioLevel = nil
+                }
+            }
+
+        case .assistantCue(let cue):
+            if !isCueActive && Self.isConversationState(Self.underlyingStateKind(of: currentState.kind)) {
+                storedCue = StoredCue(cue: cue, actionPlayed: false)
+                currentState = AvatarState(
+                    kind: currentState.kind,
+                    enteredAt: currentState.enteredAt,
+                    baseEmotion: currentState.baseEmotion,
+                    cooldowns: currentState.cooldowns,
+                    scheduled: currentState.scheduled,
+                    lastFaceSeenAt: currentState.lastFaceSeenAt,
+                    heldCue: cue
+                )
+            } else {
+                snapshotCurrentReactingIfNeeded(at: now)
+                activeReactionKey = nil
+                cooldownBoost = nil
+                let returnTo = Self.underlyingStateKind(of: currentState.kind)
+                let reaction = Reaction(
+                    expression: cue.emotion,
+                    action: cue.action,
+                    duration: rules.reactionDuration,
+                    returnTo: returnTo,
+                    isCue: true,
+                    holdsUntilEnded: cue.hold
+                )
+                if cue.hold {
+                    storedCue = StoredCue(cue: cue, actionPlayed: true)
+                } else {
+                    storedCue = nil
+                }
+                currentState = AvatarState(
+                    kind: .reacting(reaction),
+                    enteredAt: now,
+                    baseEmotion: currentState.baseEmotion,
+                    cooldowns: currentState.cooldowns,
+                    scheduled: [],
+                    lastFaceSeenAt: currentState.lastFaceSeenAt,
+                    heldCue: storedCue?.cue
+                )
+                if let action = cue.action {
+                    setAssistantAction(action)
+                }
+            }
+
+        case .assistantCueEnded:
+            storedCue = nil
+            if case .reacting(let r) = currentState.kind, r.isCue {
+                snapshotCurrentReactingIfNeeded(at: now)
+                activeAudioLevel = nil
+                activeReactionKey = nil
+                if hasFacePresent(at: now) {
+                    enterAttendingFromConversationOrCue(at: now)
+                } else {
+                    enterIdleQuietly(at: now)
+                }
+            } else {
+                currentState = AvatarState(
+                    kind: currentState.kind,
+                    enteredAt: currentState.enteredAt,
+                    baseEmotion: currentState.baseEmotion,
+                    cooldowns: currentState.cooldowns,
+                    scheduled: currentState.scheduled,
+                    lastFaceSeenAt: currentState.lastFaceSeenAt,
+                    heldCue: nil
+                )
+            }
+
+        case .assistantCommand, .assistantText, .userTranscript:
+            break
+        }
     }
 
     /// 运行时热更新单个情绪预设，供调试面板真机调参后立即在真实反应中生效。
@@ -202,7 +445,8 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
                 baseEmotion: currentState.baseEmotion,
                 cooldowns: adjusted,
                 scheduled: currentState.scheduled,
-                lastFaceSeenAt: currentState.lastFaceSeenAt
+                lastFaceSeenAt: currentState.lastFaceSeenAt,
+                heldCue: storedCue?.cue
             )
         }
     }
@@ -215,19 +459,25 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             baseEmotion: currentState.baseEmotion,
             cooldowns: currentState.cooldowns,
             scheduled: currentState.scheduled,
-            lastFaceSeenAt: currentState.lastFaceSeenAt
+            lastFaceSeenAt: currentState.lastFaceSeenAt,
+            heldCue: storedCue?.cue
         )
     }
 
     public func resetToIdle(at time: TimeInterval? = nil) async {
         let now = time ?? clock.now.timeIntervalSinceReferenceDate
+        storedCue = nil
+        activeAudioLevel = nil
+        pendingActionIsAssistant = false
+        hasActiveFaceSession = false
         currentState = AvatarState(
             kind: .idle,
             enteredAt: now,
-            baseEmotion: currentState.baseEmotion,
+            baseEmotion: .neutral,
             cooldowns: currentState.cooldowns,
             scheduled: [],
-            lastFaceSeenAt: currentState.lastFaceSeenAt
+            lastFaceSeenAt: currentState.lastFaceSeenAt,
+            heldCue: nil
         )
         wasFaceTracked = false
         pendingNoticeOnAttend = false
@@ -263,7 +513,7 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             if nextLookAroundAt == nil {
                 nextLookAroundAt = evalTime + Self.lerp(8.0, 14.0, unitRandom())
             } else if let due = nextLookAroundAt, evalTime >= due {
-                pendingAction = .play(.lookAround)
+                setPerceptionAction(.lookAround)
                 nextLookAroundAt = evalTime + Self.lerp(8.0, 14.0, unitRandom())
             }
         }
@@ -304,11 +554,10 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
         switch currentState.kind {
         case .reacting(let reaction):
             if let reactPreset = presets[reaction.expression] {
-                let factor = Self.envelope(
+                let factor = Self.reactionFactor(
+                    for: reaction,
                     elapsed: evalTime - currentState.enteredAt,
-                    duration: Self.durationSeconds(reaction.duration),
-                    blendIn: Self.durationSeconds(reactPreset.blendIn),
-                    blendOut: Self.durationSeconds(reactPreset.blendOut)
+                    preset: reactPreset
                 )
                 if factor > 0 {
                     for (name, value) in reactPreset.weights {
@@ -322,11 +571,17 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
 
         case .speaking(let emotion):
             if let speakPreset = presets[emotion] {
-                for (name, value) in speakPreset.weights {
-                    weights[name] = max(weights[name] ?? 0, value)
-                }
-                if emotion == .shy {
-                    shyFactor = 1.0
+                let factor = Self.speakingFactor(
+                    elapsed: evalTime - currentState.enteredAt,
+                    preset: speakPreset
+                )
+                if factor > 0 {
+                    for (name, value) in speakPreset.weights {
+                        weights[name] = max(weights[name] ?? 0, value * factor)
+                    }
+                    if emotion == .shy {
+                        shyFactor = max(shyFactor, factor)
+                    }
                 }
             }
             if let overlay = speakingOverlay,
@@ -346,9 +601,18 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             }
 
         case .thinking:
-            if let gentlePreset = presets[.gentle] {
-                for (name, value) in gentlePreset.weights {
-                    weights[name] = max(weights[name] ?? 0, value * 0.35)
+            if currentState.baseEmotion == .neutral {
+                if let gentlePreset = presets[.gentle] {
+                    for (name, value) in gentlePreset.weights {
+                        weights[name] = max(weights[name] ?? 0, value * 0.35)
+                    }
+                }
+            } else if let basePreset = presets[currentState.baseEmotion] {
+                for (name, value) in basePreset.weights {
+                    weights[name] = max(weights[name] ?? 0, value * 0.65)
+                }
+                if currentState.baseEmotion == .shy {
+                    shyFactor = max(shyFactor, 0.65)
                 }
             }
 
@@ -368,6 +632,13 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             }
         }
 
+        // Step 4：口型层（assistantAudioLevel 严格覆盖 jawOpen / mouthFunnel 并移除 mouthClose）
+        if let level = activeAudioLevel {
+            weights["jawOpen"] = level * Self.lipSyncJawOpenScale
+            weights["mouthFunnel"] = level * Self.lipSyncMouthFunnelScale
+            weights.removeValue(forKey: "mouthClose")
+        }
+
         // Step 5：待机层（呼吸 + 眨眼）
         let idleMotion = idleLayer.update(at: evalTime)
         weights["eyeBlinkLeft"] = max(weights["eyeBlinkLeft"] ?? 0, idleMotion.eyeBlink)
@@ -378,41 +649,47 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
         let gazeYaw: Float
         let eyeTarget: SIMD2<Float>
 
-        let isEngaged: Bool = switch currentState.kind {
-        case .attending, .listening, .speaking, .reacting: true
-        case .idle, .thinking: false
-        }
-
-        if isEngaged, let pos = latestFacePosition {
-            let dist = max(abs(pos.z), 0.15)
-            let rawYaw = atan2(pos.x, dist)
-            let rawPitch = -atan2(pos.y, dist)
-            let maxAngle = Self.maxHeadAngleRadians
-            let maxUpPitch: Float = 6 * .pi / 180
-            let maxDownPitch: Float = 12 * .pi / 180
-            let eyeRefAngle: Float = 10 * .pi / 180
-
-            // 人脸暂时丢失（尚未满 3s 回 Idle）时，0.5s~1.5s 内平滑回中，避免切 Idle 触发 lookAround 时头角突跳闪烁
-            let lostFade: Float
-            if !wasFaceTracked, let lastSeen = currentState.lastFaceSeenAt {
-                let lostDuration = evalTime - lastSeen
-                let progress = Self.clamp((lostDuration - 0.5) / 1.0, 0.0, 1.0)
-                lostFade = Float(1.0 - progress * progress * (3.0 - 2.0 * progress))
-            } else {
-                lostFade = 1.0
+        if case .thinking = currentState.kind {
+            gazePitch = Self.thinkingHeadPitchRadians
+            gazeYaw = Self.thinkingHeadYawRadians
+            eyeTarget = Self.thinkingEyeTarget
+        } else {
+            let isEngaged: Bool = switch currentState.kind {
+            case .attending, .listening, .speaking, .reacting: true
+            case .idle, .thinking: false
             }
 
-            gazeYaw = Self.clamp(rawYaw * 3.2, -maxAngle, maxAngle) * lostFade
-            gazePitch = Self.clamp(rawPitch * 0.8, -maxUpPitch, maxDownPitch) * lostFade
-            eyeTarget = SIMD2<Float>(
-                Self.clamp(rawYaw / eyeRefAngle, -1, 1) * lostFade,
-                Self.clamp(atan2(pos.y, dist) / eyeRefAngle, -1, 1) * lostFade
-            )
-        } else {
-            let wander = evaluateIdleWander(at: evalTime)
-            gazePitch = wander.pitch
-            gazeYaw = wander.yaw
-            eyeTarget = wander.eye
+            if isEngaged, let pos = latestFacePosition {
+                let dist = max(abs(pos.z), 0.15)
+                let rawYaw = atan2(pos.x, dist)
+                let rawPitch = -atan2(pos.y, dist)
+                let maxAngle = Self.maxHeadAngleRadians
+                let maxUpPitch: Float = 6 * .pi / 180
+                let maxDownPitch: Float = 12 * .pi / 180
+                let eyeRefAngle: Float = 10 * .pi / 180
+
+                // 人脸暂时丢失（尚未满 3s 回 Idle）时，0.5s~1.5s 内平滑回中，避免切 Idle 触发 lookAround 时头角突跳闪烁
+                let lostFade: Float
+                if !wasFaceTracked, let lastSeen = currentState.lastFaceSeenAt {
+                    let lostDuration = evalTime - lastSeen
+                    let progress = Self.clamp((lostDuration - 0.5) / 1.0, 0.0, 1.0)
+                    lostFade = Float(1.0 - progress * progress * (3.0 - 2.0 * progress))
+                } else {
+                    lostFade = 1.0
+                }
+
+                gazeYaw = Self.clamp(rawYaw * 3.2, -maxAngle, maxAngle) * lostFade
+                gazePitch = Self.clamp(rawPitch * 0.8, -maxUpPitch, maxDownPitch) * lostFade
+                eyeTarget = SIMD2<Float>(
+                    Self.clamp(rawYaw / eyeRefAngle, -1, 1) * lostFade,
+                    Self.clamp(atan2(pos.y, dist) / eyeRefAngle, -1, 1) * lostFade
+                )
+            } else {
+                let wander = evaluateIdleWander(at: evalTime)
+                gazePitch = wander.pitch
+                gazeYaw = wander.yaw
+                eyeTarget = wander.eye
+            }
         }
 
         // .shy 轻微低头（+8° * factor，最终经 ±25° 限幅）
@@ -459,6 +736,7 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
         // 边沿消费动作指令
         let cmd = pendingAction
         pendingAction = nil
+        pendingActionIsAssistant = false
 
         return AvatarPose(
             expressionWeights: weights,
@@ -498,6 +776,7 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
     // MARK: - Private helpers
 
     private func handleExpressionTrigger(_ expr: UserExpression, at now: TimeInterval) {
+        if isCueActive { return }
         let (key, emotion) = Self.reactionMapping(for: expr)
 
         // S-5：Speaking 期间不被打断，仅在非冷却时叠加轻量微表情（<= 0.3）
@@ -517,7 +796,8 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
                     baseEmotion: currentState.baseEmotion,
                     cooldowns: cooldowns,
                     scheduled: currentState.scheduled,
-                    lastFaceSeenAt: currentState.lastFaceSeenAt
+                    lastFaceSeenAt: currentState.lastFaceSeenAt,
+                    heldCue: storedCue?.cue
                 )
             }
             return
@@ -566,7 +846,8 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             baseEmotion: currentState.baseEmotion,
             cooldowns: currentState.cooldowns,
             scheduled: updatedScheduled,
-            lastFaceSeenAt: currentState.lastFaceSeenAt
+            lastFaceSeenAt: currentState.lastFaceSeenAt,
+            heldCue: storedCue?.cue
         )
     }
 
@@ -590,10 +871,15 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             baseEmotion: currentState.baseEmotion,
             cooldowns: currentState.cooldowns,
             scheduled: remaining,
-            lastFaceSeenAt: currentState.lastFaceSeenAt
+            lastFaceSeenAt: currentState.lastFaceSeenAt,
+            heldCue: storedCue?.cue
         )
 
         for item in due {
+            // 二次兜底 EM-3 / S-7：提示期间跳过
+            if isCueActive {
+                continue
+            }
             // 二次兜底 S-2：冷却中跳过
             if let until = currentState.cooldowns[item.key], evalTime < until {
                 continue
@@ -628,11 +914,12 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
                 baseEmotion: currentState.baseEmotion,
                 cooldowns: cooldowns,
                 scheduled: currentState.scheduled,
-                lastFaceSeenAt: currentState.lastFaceSeenAt
+                lastFaceSeenAt: currentState.lastFaceSeenAt,
+                heldCue: storedCue?.cue
             )
             activeReactionKey = item.key
             if let action = reaction.action {
-                pendingAction = .play(action)
+                setPerceptionAction(action)
             }
         }
     }
@@ -656,7 +943,8 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             baseEmotion: currentState.baseEmotion,
             cooldowns: currentState.cooldowns,
             scheduled: currentState.scheduled,
-            lastFaceSeenAt: currentState.lastFaceSeenAt
+            lastFaceSeenAt: currentState.lastFaceSeenAt,
+            heldCue: storedCue?.cue
         )
         lookingStartedAt = nil
         nextLookAroundAt = nil
@@ -666,8 +954,44 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
         }
         if pendingNoticeOnAttend {
             pendingNoticeOnAttend = false
-            pendingAction = .play(.notice)
+            setPerceptionAction(.notice)
         }
+    }
+
+    private func enterAttendingFromConversationOrCue(at now: TimeInterval) {
+        currentState = AvatarState(
+            kind: .attending,
+            enteredAt: now,
+            baseEmotion: currentState.baseEmotion,
+            cooldowns: currentState.cooldowns,
+            scheduled: [],
+            lastFaceSeenAt: currentState.lastFaceSeenAt,
+            heldCue: storedCue?.cue
+        )
+        lookingStartedAt = nil
+        nextLookAroundAt = nil
+        pendingNoticeOnAttend = false
+        distanceHistory.removeAll()
+        if let pos = latestFacePosition {
+            distanceHistory.append((now, abs(pos.z)))
+        }
+    }
+
+    private func enterIdleQuietly(at now: TimeInterval) {
+        hasActiveFaceSession = false
+        currentState = AvatarState(
+            kind: .idle,
+            enteredAt: now,
+            baseEmotion: currentState.baseEmotion,
+            cooldowns: currentState.cooldowns,
+            scheduled: [],
+            lastFaceSeenAt: currentState.lastFaceSeenAt,
+            heldCue: storedCue?.cue
+        )
+        latestFacePosition = nil
+        distanceHistory.removeAll()
+        lookingStartedAt = nil
+        nextLookAroundAt = nil
     }
 
     @discardableResult
@@ -683,13 +1007,15 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
     }
 
     private func transitionToIdleWithLookAround(at now: TimeInterval) {
+        hasActiveFaceSession = false
         currentState = AvatarState(
             kind: .idle,
             enteredAt: now,
             baseEmotion: currentState.baseEmotion,
             cooldowns: currentState.cooldowns,
             scheduled: [],
-            lastFaceSeenAt: currentState.lastFaceSeenAt
+            lastFaceSeenAt: currentState.lastFaceSeenAt,
+            heldCue: storedCue?.cue
         )
         wasFaceTracked = false
         latestFacePosition = nil
@@ -699,8 +1025,9 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
         activeReactionKey = nil
         cooldownBoost = nil
         speakingOverlay = nil
+        activeAudioLevel = nil
         fadingLayers.removeAll()
-        pendingAction = .play(.lookAround)
+        setPerceptionAction(.lookAround)
         nextLookAroundAt = now + Self.lerp(8.0, 14.0, unitRandom())
     }
 
@@ -729,31 +1056,41 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             baseEmotion: currentState.baseEmotion,
             cooldowns: currentState.cooldowns,
             scheduled: currentState.scheduled,
-            lastFaceSeenAt: currentState.lastFaceSeenAt
+            lastFaceSeenAt: currentState.lastFaceSeenAt,
+            heldCue: storedCue?.cue
         )
         activeReactionKey = nil
-        pendingAction = .play(.leanBack)
+        setPerceptionAction(.leanBack)
         distanceHistory.removeAll()
         approachCooldownUntil = now + rules.cooldown
     }
 
     private func checkReactingExpiration(at now: TimeInterval) {
         guard case .reacting(let reaction) = currentState.kind else { return }
+        guard !reaction.holdsUntilEnded else { return }
         let durationSec = Self.durationSeconds(reaction.duration)
         guard now - currentState.enteredAt + 1e-9 >= durationSec else { return }
 
         activeReactionKey = nil
-        if let lastSeen = currentState.lastFaceSeenAt,
+        if reaction.isCue {
+            activeAudioLevel = nil
+        }
+        if case .attending = reaction.returnTo,
+           let lastSeen = currentState.lastFaceSeenAt,
            now - lastSeen + 1e-9 >= rules.idleAfterFaceLost {
             transitionToIdleWithLookAround(at: now)
         } else {
+            if case .idle = reaction.returnTo {
+                hasActiveFaceSession = false
+            }
             currentState = AvatarState(
                 kind: reaction.returnTo,
                 enteredAt: now,
                 baseEmotion: currentState.baseEmotion,
                 cooldowns: currentState.cooldowns,
                 scheduled: currentState.scheduled,
-                lastFaceSeenAt: currentState.lastFaceSeenAt
+                lastFaceSeenAt: currentState.lastFaceSeenAt,
+                heldCue: storedCue?.cue
             )
         }
     }
@@ -801,6 +1138,7 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
     }
 
     private func handleGestureTrigger(_ gesture: GestureEvent, at now: TimeInterval) {
+        if isCueActive { return }
         let (key, emotion, action) = Self.gestureMapping(for: gesture.kind)
 
         // S-5：Speaking 期间不被打断，仅在非冷却时叠加轻量微表情（<= 0.3）
@@ -820,7 +1158,8 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
                     baseEmotion: currentState.baseEmotion,
                     cooldowns: cooldowns,
                     scheduled: currentState.scheduled,
-                    lastFaceSeenAt: currentState.lastFaceSeenAt
+                    lastFaceSeenAt: currentState.lastFaceSeenAt,
+                    heldCue: storedCue?.cue
                 )
             }
             return
@@ -855,20 +1194,20 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
             baseEmotion: currentState.baseEmotion,
             cooldowns: cooldowns,
             scheduled: currentState.scheduled,
-            lastFaceSeenAt: currentState.lastFaceSeenAt
+            lastFaceSeenAt: currentState.lastFaceSeenAt,
+            heldCue: storedCue?.cue
         )
         activeReactionKey = key
-        pendingAction = .play(action)
+        setPerceptionAction(action)
     }
 
     private func snapshotCurrentReactingIfNeeded(at evalTime: TimeInterval) {
         if case .reacting(let prev) = currentState.kind,
            let prevPreset = presets[prev.expression] {
-            let prevFactor = Self.envelope(
+            let prevFactor = Self.reactionFactor(
+                for: prev,
                 elapsed: evalTime - currentState.enteredAt,
-                duration: Self.durationSeconds(prev.duration),
-                blendIn: Self.durationSeconds(prevPreset.blendIn),
-                blendOut: Self.durationSeconds(prevPreset.blendOut)
+                preset: prevPreset
             )
             let fadeOut = Self.durationSeconds(prevPreset.blendOut)
             if prevFactor > 0, fadeOut > 0 {
@@ -883,6 +1222,112 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
                 ))
             }
         }
+    }
+
+    private func snapshotCurrentSpeakingIfNeeded(at evalTime: TimeInterval) {
+        if case .speaking(let prevEmotion) = currentState.kind,
+           let prevPreset = presets[prevEmotion] {
+            let prevFactor = Self.speakingFactor(
+                elapsed: evalTime - currentState.enteredAt,
+                preset: prevPreset
+            )
+            let fadeOut = Self.durationSeconds(prevPreset.blendOut)
+            if prevFactor > 0, fadeOut > 0 {
+                var snapshot: [String: Float] = [:]
+                for (name, val) in prevPreset.weights {
+                    snapshot[name] = val * prevFactor
+                }
+                fadingLayers.append(FadingLayer(
+                    weights: snapshot,
+                    startedAt: evalTime,
+                    fadeOutDuration: fadeOut
+                ))
+            }
+        }
+    }
+
+    private func currentEventTime() -> TimeInterval {
+        let now = clock.now.timeIntervalSinceReferenceDate
+        if now.isFinite {
+            return now
+        }
+        return lastEvaluatedTime ?? currentState.enteredAt
+    }
+
+    private func hasFacePresent(at now: TimeInterval) -> Bool {
+        if wasFaceTracked { return true }
+        guard hasActiveFaceSession, let lastSeen = currentState.lastFaceSeenAt else { return false }
+        return now - lastSeen + 1e-9 < rules.idleAfterFaceLost
+    }
+
+    private var isCueActive: Bool {
+        if case .reacting(let reaction) = currentState.kind {
+            return reaction.isCue
+        }
+        return false
+    }
+
+    private func setAssistantAction(_ action: ActionTag) {
+        pendingAction = .play(action)
+        pendingActionIsAssistant = true
+    }
+
+    private func setPerceptionAction(_ action: ActionTag) {
+        guard !pendingActionIsAssistant else { return }
+        pendingAction = .play(action)
+    }
+
+    private static func isConversationState(_ kind: AvatarStateKind) -> Bool {
+        switch kind {
+        case .listening, .thinking, .speaking:
+            return true
+        case .idle, .attending, .reacting:
+            return false
+        }
+    }
+
+    private static func baseEmotion(for userEmotion: UserEmotion) -> EmotionTag {
+        switch userEmotion {
+        case .happy:
+            return .happy
+        case .calm:
+            return .neutral
+        case .sad, .tired, .anxious, .angry:
+            return .concerned
+        }
+    }
+
+    private static func reactionFactor(
+        for reaction: Reaction,
+        elapsed: TimeInterval,
+        preset: ExpressionPreset
+    ) -> Float {
+        if reaction.holdsUntilEnded {
+            guard elapsed >= 0 else { return 0 }
+            let blendIn = Self.durationSeconds(preset.blendIn)
+            if blendIn > 0 {
+                return Float(Self.clamp(elapsed / blendIn, 0, 1))
+            }
+            return 1.0
+        }
+        return Self.envelope(
+            elapsed: elapsed,
+            duration: Self.durationSeconds(reaction.duration),
+            blendIn: Self.durationSeconds(preset.blendIn),
+            blendOut: Self.durationSeconds(preset.blendOut)
+        )
+    }
+
+    private static func speakingFactor(
+        elapsed: TimeInterval,
+        preset: ExpressionPreset
+    ) -> Float {
+        guard elapsed >= 0 else { return 0 }
+        let blendIn = Self.durationSeconds(preset.blendIn)
+        if blendIn > 0 {
+            return Float(Self.clamp(elapsed / blendIn, 0, 1))
+        }
+        return 1.0
     }
 
     private static func gestureMapping(for kind: GestureKind) -> (ReactionKey, EmotionTag, ActionTag) {
