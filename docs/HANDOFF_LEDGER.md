@@ -1,0 +1,31 @@
+# Handoff Ledger
+
+> 滚动活体台账（严格 ≤ 100 行）。仅作上下文承接种子线索，已解决待办立即删除，过旧契约滚动裁剪。
+
+## 1. 未清零遗留待办（非阻断项 / 已知限制）
+
+- `[002-m1-presence]` Phase 6 收尾未完成：`T048`（真机性能/热状态验收 SC-006）、`T049`（主观验收 SC-007 并将全部实测数据写入 `specs/002-m1-presence/research.md`）、`T050`（按需同步 `docs/tech-selection.md`）。
+- `[002-m1-us4 / issue-001]` 真机偶发观察：静止注视时约每 14–15 s 向左下方低头约 3 s 后回平视（暂未复现），排查线索与取证步骤见 `docs/issues/001-periodic-bottom-left-head-drop.md`。
+- `[002-m1-avatar]` `Assets/avatar/auto-build/scripts/validate_phase1.py` 动作防穿模目前仅校验第 15 帧（独立全帧 `1..35` 实测无穿模），后续修改动作轨道时可按需扩至多帧抽检。
+- `[002-m1-us2/us3]` 极轻优化备忘：`AvatarScene.canMeasureTrackLatency` 可按需追加 `&& !isDebugPanelPresented`；`AvatarDebugPanel` 表情预设导出 JSON 可按需增加缓存。
+
+## 2. 已实测的环境与第三方依赖陷阱
+
+- **Swift 6.4 `Swift.Clock` 命名冲突**：裸写 `any Clock` 会与标准库 `Swift.Clock` 歧义报错 → 所有源码与测试引用 `MMCore` 时钟协议必须显式写 `any MMCore.Clock`。
+- **沙盒内 `swift test` Clang Module Cache 权限**：默认 `/var/folders/.../C/clang/ModuleCache` 不可写 → 沙盒内运行单测须带 `CLANG_MODULE_CACHE_PATH=/tmp/minimate-clang-cache SWIFT_DRIVER_SWIFT_SCAN_LIB_CACHE=/tmp/minimate-swift-cache swift test --disable-sandbox`（常规本机终端直接 `swift test`）。
+- **ARKit `ARFrame.timestamp` 与 `Clock.now` 时间基不一致**：`ARFrame.timestamp` 为 `systemUptime` 单调秒数，与 `timeIntervalSinceReferenceDate` 相差约 8 亿秒 → `ARKitPerceptionSource` 须以 `systemUptime - frame.timestamp` 差值换算至 `clock.now.timeIntervalSinceReferenceDate` 并做单调递增保护。
+- **ARKit 真机 `BlendShapeLocation.rawValue` 带 `_L`/`_R` 后缀**：真机返回 `"mouthSmile_L"` 等非标准键名 → 已在 `ARKitPerceptionSource` 用 52 键显式映射表规范为 camelCase `Left`/`Right`，并在 `FaceSignalDeriver` 保留 `_L`/`_R` 兼容兜底。
+- **Swift 6 `CVPixelBuffer` 非 `Sendable` + 前置横向缓冲区**：跨 `gestureQueue` 禁止持有 `ARFrame`（会耗尽帧池），须仅传 `UncheckedBox(frame.capturedImage)` + 单飞行丢帧；`VNImageRequestHandler` 必须显式传 `orientation: .leftMirrored`。
+- **RealityKit 骨架动画防飞出铁律（`docs/avatar-action-binding-issue.md`）**：严禁删除 `RealityKitAvatarRenderer` 的 `guard playback == nil else { return }`，且 `FromToByAnimation<JointTransforms>` 必须传完整 `skeletonJointNames` 整骨架数组。
+- **SwiftPM `.process("Resources")` 扁平化路径**：`expression-presets.json` 位于 `Bundle.module` 根目录 → 必须用 `Bundle.module.url(forResource:withExtension:)`，严禁传 `subdirectory: "Resources"`。
+- **Blender 5.3 / Phase 1 资产管线**：内建 NumPy 2.x 已移除 `ndarray.ptp()`（须用 `np.ptp(arr)`）；手指骨骼反向且枢轴错位，严禁对骨骼执行 `armature_apply`（改为网格空间解剖枢轴变形）；`build_phase1.py` 保存前须调用 `ac.make_actions` 防回退旧动作；Phase 1 脚本零依赖 VRM Add-on 可在沙盒直跑。
+- **`M_feedback` 在全屏调试面板下的采集**：`NavigationDestination` 推入全屏 `AvatarDebugPanel` 时底层 `RealityView` `tick()` 暂停 → 面板开启态须在 `injectConversationEvent` 的 `pose(at:)` 返回后直接记 `FeedbackLatencyTracker`，关闭态由 `tick()` 在 `renderer.apply(pose)` 后端到端记录。
+
+## 3. 近期关键契约变更（滚动保留最近 5–8 项）
+
+- `[002-m1-us5]` `MMCore` 新增 `AssistantCommand`、`PlaybackResult`、`AvatarCue` 并扩展 `ConversationEvent`（`.assistantCommand`/`.assistantCue`/`.assistantCueEnded`）；`RuleBasedEmotionStateMachine` 实现完整对话阶段转换、口型同步与 `EM-1..EM-5` 形象提示；新增 `FeedbackLatencyTracker` 与 `AvatarScreen`/`AvatarDebugPanel` FIFO 串行对话事件注入；全量单测基线 **138/138（23 suites）**。
+- `[005-voice-photo]` 定稿语音拍照 SDD 全套文档并同步 002/003/004 共享契约（`<cmd>`、`AvatarCue` EM-1–EM-5、`holdReplies`/`releaseReplies` RH-1–RH-5、`PhotoCaptureSource`）。
+- `[002-m1-us4]` `MMPerception` 新增 `HandGestureClassifier`（挥手 / 单手韩式比心 / 双手比心 / 点赞）与 `ThermalGesturePolicy`；`ARKitPerceptionSource` 接入 12 Hz Vision 异步抽帧、热降频与 `AsyncStream` 背压手势恢复重发；`RuleBasedEmotionStateMachine` 支持手势立即反应与 `updateCooldown(_:at:)`（App 默认 5 s）。
+- `[002-m1-us3]` 新增 `FaceSignalDeriver`、`MirrorCorrelationEvaluator`、`ReflexLatencyTracker`、`RecordingAvatarRenderer` 与 `expression-presets.json`（8 情绪预设）；`RuleBasedEmotionStateMachine` 支持延迟/冷却/防镜像表情反应与 `updatePreset(_:)` 热更新。
+- `[002-m1-avatar]` 完成小瓜 3D 形象 Phase 1.4 精修（直腿 / 厚掌 / 微弯手 / 白袜），`minimate.usdz`（39,032 三角面 / 52 ARKit / 124 形态键 / 8 动作 / 295 帧）与 `.actions.json` 同步至 `App/MiniMate/Resources/Avatar/`。
+- `[002-m1-us2]` 新增 `OneEuroFilter`、`LookingAtScreenDetector`、`ARKitPerceptionSource`、`ScriptedPerceptionSource`、`TrackLatencyTracker` 及 `RuleBasedEmotionStateMachine` 注意力状态机，接通 `AvatarScreen` 60 Hz 视线与头部追踪。
