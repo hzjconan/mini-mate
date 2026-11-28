@@ -30,11 +30,16 @@ let package = Package(
         .target(
             name: "MMConversation",
             dependencies: ["MMCore", "MMAudio", "MMSecurity"],
-            resources: [.process("Resources")]
+            resources: [.process("Resources")],
+            linkerSettings: [.linkedLibrary("z")]
+        ),
+        .target(
+            name: "MMProbeCore",
+            dependencies: ["MMCore", "MMAudio", "MMConversation", "MMSecurity"]
         ),
         .executableTarget(
             name: "MMProbeCLI",
-            dependencies: ["MMConversation", "MMAudio", "MMSecurity"]
+            dependencies: ["MMProbeCore"]
         ),
         .testTarget(name: "MMCoreTests", dependencies: ["MMCore"]),
         .testTarget(name: "MMDiagnosticsTests", dependencies: ["MMDiagnostics"]),
@@ -44,7 +49,8 @@ let package = Package(
         .testTarget(name: "MMAudioTests", dependencies: ["MMAudio", "MMCore"]),
         .testTarget(
             name: "MMConversationTests",
-            dependencies: ["MMConversation", "MMAudio", "MMCore", "MMSecurity"]
+            dependencies: ["MMConversation", "MMAudio", "MMCore", "MMSecurity", "MMProbeCore"],
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

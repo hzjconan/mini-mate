@@ -168,8 +168,8 @@ struct FoundationalTests {
     func emotionMappingRoundTripAndFallback() throws {
         let json = """
         {
-          "vendor": "aliyun",
-          "voice": "longxiaoxia",
+          "driverID": "mock-tts",
+          "voice": "demo-voice",
           "map": {
             "neutral": { "style": "neutral", "rate": 1.0, "warm": false },
             "happy": { "style": "cheerful", "rate": 1.15, "warm": true }
@@ -177,8 +177,8 @@ struct FoundationalTests {
         }
         """
         let mapping = try TTSEmotionMapping.load(from: Data(json.utf8))
-        #expect(mapping.vendor == .aliyun)
-        #expect(mapping.voice == "longxiaoxia")
+        #expect(mapping.driverID == "mock-tts")
+        #expect(mapping.voice == "demo-voice")
 
         let happy = mapping.params(for: .happy)
         #expect(happy.string("style") == "cheerful")
@@ -197,25 +197,30 @@ struct FoundationalTests {
         #expect(decoded == mapping)
     }
 
-    @Test("TTSEmotionMapping 拒绝空 voice、未知情绪键、缺 neutral 与缺失内置文件")
+    @Test("TTSEmotionMapping 拒绝空 driverID、空 voice、未知情绪键、缺 neutral 与缺失内置文件")
     func emotionMappingValidationErrors() {
-        let emptyVoice = #"{"vendor":"aliyun","voice":"   ","map":{"neutral":{}}}"#
+        let emptyDriver = #"{"driverID":"   ","voice":"demo-voice","map":{"neutral":{}}}"#
+        #expect(throws: TTSEmotionMappingError.emptyDriverID) {
+            _ = try TTSEmotionMapping.load(from: Data(emptyDriver.utf8))
+        }
+
+        let emptyVoice = #"{"driverID":"mock-tts","voice":"   ","map":{"neutral":{}}}"#
         #expect(throws: TTSEmotionMappingError.emptyVoice) {
             _ = try TTSEmotionMapping.load(from: Data(emptyVoice.utf8))
         }
 
-        let unknownKey = #"{"vendor":"aliyun","voice":"v1","map":{"neutral":{},"excited":{"rate":1.2}}}"#
+        let unknownKey = #"{"driverID":"mock-tts","voice":"v1","map":{"neutral":{},"excited":{"rate":1.2}}}"#
         #expect(throws: TTSEmotionMappingError.unknownEmotionKey("excited")) {
             _ = try TTSEmotionMapping.load(from: Data(unknownKey.utf8))
         }
 
-        let missingNeutral = #"{"vendor":"aliyun","voice":"v1","map":{"happy":{"rate":1.1}}}"#
+        let missingNeutral = #"{"driverID":"mock-tts","voice":"v1","map":{"happy":{"rate":1.1}}}"#
         #expect(throws: TTSEmotionMappingError.missingNeutralMapping) {
             _ = try TTSEmotionMapping.load(from: Data(missingNeutral.utf8))
         }
 
-        #expect(throws: TTSEmotionMappingError.resourceNotFound(.aliyun)) {
-            _ = try TTSEmotionMapping.loadBundled(for: .aliyun)
+        #expect(throws: TTSEmotionMappingError.resourceNotFound("mock-tts")) {
+            _ = try TTSEmotionMapping.loadBundled(for: "mock-tts")
         }
     }
 

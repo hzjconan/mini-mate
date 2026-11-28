@@ -1,0 +1,10 @@
+{"direction":"out","kind":"text","seq":1,"text":"{\"instructions_length\":128,\"modalities\":[\"text\"],\"type\":\"session.configure\"}","timestampMs":0}
+{"direction":"in","kind":"text","seq":2,"text":"{\"modalities\":[\"text\"],\"type\":\"session.ready\"}","timestampMs":12}
+{"direction":"in","kind":"text","seq":3,"text":"{\"type\":\"speech.started\"}","timestampMs":120}
+{"direction":"in","kind":"text","seq":4,"text":"{\"is_final\":true,\"text\":\"我今天还行吧\",\"type\":\"user.transcript\"}","timestampMs":650}
+{"direction":"in","kind":"text","seq":5,"text":"{\"type\":\"speech.ended\"}","timestampMs":660}
+{"direction":"in","kind":"text","seq":6,"text":"{\"type\":\"server.heartbeat\"}","timestampMs":680}
+{"direction":"in","kind":"text","seq":7,"text":"{\"delta\":\"<user:calm><emo:playful>听起来还不错呀，\",\"type\":\"text.delta\"}","timestampMs":740}
+{"direction":"in","kind":"text","seq":8,"text":"{\"delta\":\"<act:nod>要不要聊聊今天发生啥啦？\",\"type\":\"text.delta\"}","timestampMs":810}
+{"direction":"in","kind":"text","seq":9,"text":"{\"base64\":\"AAAA\",\"type\":\"audio.delta\"}","timestampMs":840}
+{"direction":"in","kind":"text","seq":10,"text":"{\"type\":\"response.done\"}","timestampMs":860}

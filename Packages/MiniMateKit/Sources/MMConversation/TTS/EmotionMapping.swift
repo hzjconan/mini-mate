@@ -1,8 +1,7 @@
 import Foundation
 import MMCore
-import MMSecurity
 
-/// 厂商情感参数 JSON 标量值。
+/// Emotion parameter JSON scalar value.
 public enum JSONScalar: Sendable, Equatable, Codable {
     case string(String)
     case number(Double)
@@ -10,7 +9,7 @@ public enum JSONScalar: Sendable, Equatable, Codable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        // 必须按 Bool → Double → String 顺序解码，避免布尔值被误判为数字
+        // Decode in Bool -> Double -> String order so booleans are not misread as numbers.
         if let boolVal = try? container.decode(Bool.self) {
             self = .bool(boolVal)
         } else if let doubleVal = try? container.decode(Double.self) {
@@ -41,10 +40,10 @@ public enum JSONScalar: Sendable, Equatable, Codable {
     }
 }
 
-/// 单个情绪对应的厂商参数集合（JSON 中直接编码/解码为平面对象 `{ ... }`）。
-public struct VendorEmotionParams: Sendable, Equatable, Codable {
+/// Driver-specific parameter bag for a single emotion (encoded as flat JSON object `{ ... }`).
+public struct EmotionParameterSet: Sendable, Equatable, Codable {
     public let parameters: [String: JSONScalar]
-    public static let empty = VendorEmotionParams([:])
+    public static let empty = EmotionParameterSet([:])
 
     public init(_ parameters: [String: JSONScalar] = [:]) {
         self.parameters = parameters
@@ -78,40 +77,45 @@ public struct VendorEmotionParams: Sendable, Equatable, Codable {
     }
 }
 
-/// `TTSEmotionMapping` 加载与校验错误。
+/// Loading and validation errors for `TTSEmotionMapping`.
 public enum TTSEmotionMappingError: Error, Sendable, Equatable {
-    case resourceNotFound(VendorID)
+    case resourceNotFound(String)
+    case emptyDriverID
     case emptyVoice
     case unknownEmotionKey(String)
     case missingNeutralMapping
 }
 
-/// 厂商 TTS 音色与情绪参数映射表（contracts/tts-provider.md）。
+/// Voice and per-emotion parameter mapping table for a TTS driver (contracts/tts-provider.md).
 public struct TTSEmotionMapping: Sendable, Equatable, Codable {
-    public let vendor: VendorID
+    public let driverID: String
     public let voice: String
-    public let map: [EmotionTag: VendorEmotionParams]
+    public let map: [EmotionTag: EmotionParameterSet]
 
     private enum CodingKeys: String, CodingKey {
-        case vendor
+        case driverID
         case voice
         case map
     }
 
-    public init(vendor: VendorID, voice: String, map: [EmotionTag: VendorEmotionParams]) {
-        self.vendor = vendor
+    public init(driverID: String, voice: String, map: [EmotionTag: EmotionParameterSet]) {
+        self.driverID = driverID
         self.voice = voice
         self.map = map
     }
 
-    /// TTS-2：返回指定情绪的参数；缺失时回退至 `.neutral`，若手工构造且连 `.neutral` 也缺失则回退 `.empty`。
-    public func params(for emotion: EmotionTag) -> VendorEmotionParams {
+    /// TTS-2: returns parameters for `emotion`, falling back to `.neutral` or `.empty`.
+    public func params(for emotion: EmotionTag) -> EmotionParameterSet {
         map[emotion] ?? map[.neutral] ?? .empty
     }
 
-    /// 解码 JSON 并校验：`voice` 去空白后非空（TTS-1）、`map` 中每个键必须为合法 `EmotionTag.rawValue`、`map[.neutral]` 必存在。
+    /// Decodes JSON and validates non-empty `driverID`, non-empty `voice` (TTS-1),
+    /// valid `EmotionTag` keys, and required `.neutral` entry.
     public static func load(from data: Data) throws -> TTSEmotionMapping {
         let mapping = try JSONDecoder().decode(TTSEmotionMapping.self, from: data)
+        guard !mapping.driverID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw TTSEmotionMappingError.emptyDriverID
+        }
         guard !mapping.voice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw TTSEmotionMappingError.emptyVoice
         }
@@ -121,24 +125,33 @@ public struct TTSEmotionMapping: Sendable, Equatable, Codable {
         return mapping
     }
 
-    /// 从 `Bundle.module` 根目录加载 `tts-emotion-<vendor>.json`；不存在抛 `.resourceNotFound(vendor)`。
-    public static func loadBundled(for vendor: VendorID) throws -> TTSEmotionMapping {
-        let resourceName = "tts-emotion-\(vendor.rawValue)"
-        guard let url = Bundle.module.url(forResource: resourceName, withExtension: "json") else {
-            throw TTSEmotionMappingError.resourceNotFound(vendor)
-        }
+    /// Loads and validates a mapping JSON file from disk.
+    public static func load(fromFile url: URL) throws -> TTSEmotionMapping {
         let data = try Data(contentsOf: url)
         return try load(from: data)
     }
 
+    /// Loads `tts-emotion-<driverID>.json` from `Bundle.module` root; throws `.resourceNotFound(driverID)` if absent.
+    public static func loadBundled(for driverID: String) throws -> TTSEmotionMapping {
+        let trimmed = driverID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw TTSEmotionMappingError.emptyDriverID
+        }
+        let resourceName = "tts-emotion-\(trimmed)"
+        guard let url = Bundle.module.url(forResource: resourceName, withExtension: "json") else {
+            throw TTSEmotionMappingError.resourceNotFound(trimmed)
+        }
+        return try load(fromFile: url)
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.vendor = try container.decode(VendorID.self, forKey: .vendor)
+        self.driverID = try container.decode(String.self, forKey: .driverID)
         self.voice = try container.decode(String.self, forKey: .voice)
 
-        // 手动经 [String: VendorEmotionParams] 解码为 JSON 对象，避免 Swift 默认把枚举键编解码成交替数组
-        let rawMap = try container.decode([String: VendorEmotionParams].self, forKey: .map)
-        var parsedMap: [EmotionTag: VendorEmotionParams] = [:]
+        // Decode via [String: EmotionParameterSet] so JSON objects are used instead of alternating arrays.
+        let rawMap = try container.decode([String: EmotionParameterSet].self, forKey: .map)
+        var parsedMap: [EmotionTag: EmotionParameterSet] = [:]
         parsedMap.reserveCapacity(rawMap.count)
         for (key, value) in rawMap {
             guard let emotion = EmotionTag(rawValue: key) else {
@@ -151,10 +164,10 @@ public struct TTSEmotionMapping: Sendable, Equatable, Codable {
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(vendor, forKey: .vendor)
+        try container.encode(driverID, forKey: .driverID)
         try container.encode(voice, forKey: .voice)
 
-        var rawMap: [String: VendorEmotionParams] = [:]
+        var rawMap: [String: EmotionParameterSet] = [:]
         rawMap.reserveCapacity(map.count)
         for (emotion, params) in map {
             rawMap[emotion.rawValue] = params

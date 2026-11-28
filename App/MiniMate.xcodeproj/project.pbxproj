@@ -13,6 +13,8 @@
 		0A0A0A0A0A0A0A0A0A0A0004 /* MMAvatar in Frameworks */ = {isa = PBXBuildFile; productRef = 505050505050505050500004 /* MMAvatar */; };
 		0A0A0A0A0A0A0A0A0A0A0005 /* MMPerception in Frameworks */ = {isa = PBXBuildFile; productRef = 505050505050505050500005 /* MMPerception */; };
 		0A0A0A0A0A0A0A0A0A0A0006 /* MMEmotion in Frameworks */ = {isa = PBXBuildFile; productRef = 505050505050505050500006 /* MMEmotion */; };
+		0A0A0A0A0A0A0A0A0A0A0007 /* MMAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 505050505050505050500007 /* MMAudio */; };
+		0A0A0A0A0A0A0A0A0A0A0008 /* MMConversation in Frameworks */ = {isa = PBXBuildFile; productRef = 505050505050505050500008 /* MMConversation */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +40,8 @@
 				0A0A0A0A0A0A0A0A0A0A0004 /* MMAvatar in Frameworks */,
 				0A0A0A0A0A0A0A0A0A0A0005 /* MMPerception in Frameworks */,
 				0A0A0A0A0A0A0A0A0A0A0006 /* MMEmotion in Frameworks */,
+				0A0A0A0A0A0A0A0A0A0A0007 /* MMAudio in Frameworks */,
+				0A0A0A0A0A0A0A0A0A0A0008 /* MMConversation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -86,6 +90,8 @@
 				505050505050505050500004 /* MMAvatar */,
 				505050505050505050500005 /* MMPerception */,
 				505050505050505050500006 /* MMEmotion */,
+				505050505050505050500007 /* MMAudio */,
+				505050505050505050500008 /* MMConversation */,
 			);
 			productName = MiniMate;
 			productReference = 0D0D0D0D0D0D0D0D0D0D0001 /* MiniMate.app */;
@@ -392,6 +398,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 404040404040404040400001 /* XCLocalSwiftPackageReference "../Packages/MiniMateKit" */;
 			productName = MMEmotion;
+		};
+		505050505050505050500007 /* MMAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 404040404040404040400001 /* XCLocalSwiftPackageReference "../Packages/MiniMateKit" */;
+			productName = MMAudio;
+		};
+		505050505050505050500008 /* MMConversation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 404040404040404040400001 /* XCLocalSwiftPackageReference "../Packages/MiniMateKit" */;
+			productName = MMConversation;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

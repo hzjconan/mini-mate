@@ -1,57 +1,153 @@
 import Foundation
+import os
 import Security
 
-/// Vendor key storage boundary (Constitution IV): keys live only in Keychain.
-public protocol CredentialStore: Sendable {
-    func save(key: String, for vendor: VendorID) throws
-    /// Configuration state; only exposes the last 4 characters, never the key.
-    func status(for vendor: VendorID) -> CredentialStatus
-    /// Removing a missing key is a no-op.
-    func delete(for vendor: VendorID) throws
-}
+/// Sensitive credential bundle for a single provider profile.
+/// Never prints plaintext secrets in `description` or `debugDescription` (Constitution VII).
+public struct ProviderCredentials: Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
+    public let primarySecret: String
+    public let secondarySecret: String?
 
-public struct CredentialStatus: Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
-    public let vendor: VendorID
-    public let isConfigured: Bool
-    /// Last 4 characters of the stored key; nil when unconfigured.
-    public let suffix: String?
-
-    public init(vendor: VendorID, isConfigured: Bool, suffix: String?) {
-        self.vendor = vendor
-        self.isConfigured = isConfigured
-        self.suffix = suffix
+    public init(primarySecret: String, secondarySecret: String? = nil) {
+        self.primarySecret = primarySecret
+        self.secondarySecret = secondarySecret
     }
 
-    /// MUST NOT contain the full key (Constitution VII).
     public var description: String {
-        if isConfigured, let suffix {
-            return "已配置（末 4 位 \(suffix)）"
-        }
-        return "未配置"
+        "ProviderCredentials(primary: [REDACTED], secondary: \(secondarySecret == nil ? "nil" : "[REDACTED]"))"
     }
 
     public var debugDescription: String { description }
 }
 
-public enum CredentialStoreError: Error, Sendable {
+/// Redacted credential status for display in UI and logs.
+public struct CredentialStatus: Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
+    public let profileID: UUID
+    public let isPrimaryConfigured: Bool
+    public let primarySuffix: String?
+    public let isSecondaryConfigured: Bool
+    public let secondarySuffix: String?
+
+    public var isConfigured: Bool { isPrimaryConfigured }
+
+    public init(
+        profileID: UUID,
+        isPrimaryConfigured: Bool,
+        primarySuffix: String?,
+        isSecondaryConfigured: Bool = false,
+        secondarySuffix: String? = nil
+    ) {
+        self.profileID = profileID
+        self.isPrimaryConfigured = isPrimaryConfigured
+        self.primarySuffix = primarySuffix
+        self.isSecondaryConfigured = isSecondaryConfigured
+        self.secondarySuffix = secondarySuffix
+    }
+
+    /// Masks short secrets (<= 4 chars) completely to prevent exposing the full value as a suffix.
+    public static func maskedSuffix(for secret: String) -> String {
+        secret.count <= 4 ? "****" : String(secret.suffix(4))
+    }
+
+    public var description: String {
+        guard isPrimaryConfigured, let primarySuffix else {
+            return "未配置"
+        }
+        if isSecondaryConfigured, let secondarySuffix {
+            return "已配置（主末 4 位 \(primarySuffix) · 附加末 4 位 \(secondarySuffix)）"
+        }
+        return "已配置（末 4 位 \(primarySuffix)）"
+    }
+
+    public var debugDescription: String { description }
+}
+
+public enum CredentialStoreError: Error, Sendable, Equatable {
+    case emptyPrimarySecret
     case saveFailed(OSStatus)
+    case loadFailed(OSStatus)
     case deleteFailed(OSStatus)
+    case encodingFailed
+}
+
+/// Keychain-only credential storage boundary keyed by `profileID` (Constitution IV & VII).
+public protocol CredentialStore: Sendable {
+    func save(_ credentials: ProviderCredentials, for profileID: UUID) throws
+    func load(for profileID: UUID) throws -> ProviderCredentials?
+    /// Configuration status; exposes at most a redacted suffix, never the secret.
+    func status(for profileID: UUID) -> CredentialStatus
+    /// Removing a missing credential is a no-op.
+    func delete(for profileID: UUID) throws
+}
+
+private struct StoredSecretPayload: Codable {
+    let primary: String
+    let secondary: String?
+}
+
+private func normalizeCredentials(_ credentials: ProviderCredentials) throws -> ProviderCredentials {
+    let trimmedPrimary = credentials.primarySecret.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedPrimary.isEmpty else {
+        throw CredentialStoreError.emptyPrimarySecret
+    }
+    let trimmedSecondary: String? = {
+        guard let raw = credentials.secondarySecret?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty
+        else {
+            return nil
+        }
+        return raw
+    }()
+    return ProviderCredentials(primarySecret: trimmedPrimary, secondarySecret: trimmedSecondary)
+}
+
+private func makeStatus(profileID: UUID, credentials: ProviderCredentials?) -> CredentialStatus {
+    guard let credentials else {
+        return CredentialStatus(
+            profileID: profileID,
+            isPrimaryConfigured: false,
+            primarySuffix: nil,
+            isSecondaryConfigured: false,
+            secondarySuffix: nil
+        )
+    }
+    return CredentialStatus(
+        profileID: profileID,
+        isPrimaryConfigured: true,
+        primarySuffix: CredentialStatus.maskedSuffix(for: credentials.primarySecret),
+        isSecondaryConfigured: credentials.secondarySecret != nil,
+        secondarySuffix: credentials.secondarySecret.map(CredentialStatus.maskedSuffix(for:))
+    )
 }
 
 /// Keychain-backed store: generic password, this-device-only, after first unlock.
 public struct KeychainCredentialStore: CredentialStore {
-    private let service = "ai.minimate.credentials"
+    private let service: String
 
-    public init() {}
+    public init(service: String = "ai.minimate.credentials.v2") {
+        self.service = service
+    }
 
-    public func save(key: String, for vendor: VendorID) throws {
+    public func save(_ credentials: ProviderCredentials, for profileID: UUID) throws {
+        let normalized = try normalizeCredentials(credentials)
+        let payload = StoredSecretPayload(
+            primary: normalized.primarySecret,
+            secondary: normalized.secondarySecret
+        )
+        let data: Data
+        do {
+            data = try JSONEncoder().encode(payload)
+        } catch {
+            throw CredentialStoreError.encodingFailed
+        }
+
         let baseQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: vendor.rawValue,
+            kSecAttrAccount as String: profileID.uuidString,
         ]
         let attributes: [String: Any] = [
-            kSecValueData as String: Data(key.utf8),
+            kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
 
@@ -60,7 +156,7 @@ public struct KeychainCredentialStore: CredentialStore {
         var status = SecItemAdd(item as CFDictionary, nil)
         if status == errSecDuplicateItem {
             status = SecItemUpdate(baseQuery as CFDictionary, [
-                kSecValueData as String: Data(key.utf8),
+                kSecValueData as String: data,
             ] as CFDictionary)
         }
         guard status == errSecSuccess else {
@@ -68,29 +164,43 @@ public struct KeychainCredentialStore: CredentialStore {
         }
     }
 
-    public func status(for vendor: VendorID) -> CredentialStatus {
+    public func load(for profileID: UUID) throws -> ProviderCredentials? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: vendor.rawValue,
+            kSecAttrAccount as String: profileID.uuidString,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let key = String(data: data, encoding: .utf8)
-        else {
-            return CredentialStatus(vendor: vendor, isConfigured: false, suffix: nil)
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecItemNotFound {
+            return nil
         }
-        return CredentialStatus(vendor: vendor, isConfigured: true, suffix: String(key.suffix(4)))
+        guard status == errSecSuccess else {
+            throw CredentialStoreError.loadFailed(status)
+        }
+        guard let data = item as? Data,
+              let payload = try? JSONDecoder().decode(StoredSecretPayload.self, from: data)
+        else {
+            throw CredentialStoreError.encodingFailed
+        }
+        return ProviderCredentials(
+            primarySecret: payload.primary,
+            secondarySecret: payload.secondary
+        )
     }
 
-    public func delete(for vendor: VendorID) throws {
+    public func status(for profileID: UUID) -> CredentialStatus {
+        let loaded = try? load(for: profileID)
+        return makeStatus(profileID: profileID, credentials: loaded)
+    }
+
+    public func delete(for profileID: UUID) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: vendor.rawValue,
+            kSecAttrAccount as String: profileID.uuidString,
         ]
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
@@ -100,26 +210,26 @@ public struct KeychainCredentialStore: CredentialStore {
 }
 
 /// In-memory store for tests and previews.
-public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable {
-    private var keys: [VendorID: String] = [:]
-    private let lock = NSLock()
+public final class InMemoryCredentialStore: CredentialStore, Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: [UUID: ProviderCredentials]())
 
     public init() {}
 
-    public func save(key: String, for vendor: VendorID) throws {
-        lock.withLock { keys[vendor] = key }
+    public func save(_ credentials: ProviderCredentials, for profileID: UUID) throws {
+        let normalized = try normalizeCredentials(credentials)
+        state.withLock { $0[profileID] = normalized }
     }
 
-    public func status(for vendor: VendorID) -> CredentialStatus {
-        let key = lock.withLock { keys[vendor] }
-        return CredentialStatus(
-            vendor: vendor,
-            isConfigured: key != nil,
-            suffix: key.map { String($0.suffix(4)) }
-        )
+    public func load(for profileID: UUID) throws -> ProviderCredentials? {
+        state.withLock { $0[profileID] }
     }
 
-    public func delete(for vendor: VendorID) throws {
-        lock.withLock { keys[vendor] = nil }
+    public func status(for profileID: UUID) -> CredentialStatus {
+        let credentials = state.withLock { $0[profileID] }
+        return makeStatus(profileID: profileID, credentials: credentials)
+    }
+
+    public func delete(for profileID: UUID) throws {
+        state.withLock { $0[profileID] = nil }
     }
 }

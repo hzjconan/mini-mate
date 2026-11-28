@@ -7,17 +7,18 @@
 | 路径 | 职责边界 |
 | :--- | :--- |
 | `App/MiniMate/` | iOS 26+ SwiftUI App 与组合根（`MiniMateApp`、`AppComposition`）；objectVersion 77 文件系统同步组，新增文件自动纳入 target |
-| `App/MiniMate/Screens/` | 主页面与调试面板：`HomeView`、`AvatarScreen`（含 `AvatarScene` 60 Hz 渲染与感知/对话接线）、`DiagnosticsView`、`SettingsView`、`Debug/AvatarDebugPanel` |
+| `App/MiniMate/Screens/` | 主页面与调试面板：`HomeView`、`AvatarScreen`（含 `AvatarScene` 60 Hz 渲染与感知/对话接线）、`DiagnosticsView`、`SettingsView`（双用途动态多配置与 Active 切换）、`ProviderProfileEditorSheet`、`Debug/AvatarDebugPanel` |
 | `App/MiniMate/Resources/Avatar/` | 真机打包 3D 资产：`minimate.usdz` 与 `minimate.actions.json`（由 `Assets/avatar/auto-build` 产出并字节同步） |
 | `Packages/MiniMateKit/Sources/MMCore/` | 零外部依赖核心领域模型与基础设施：`Clock`/`SystemClock`、`EmotionTag`、`ActionTag`、`UserEmotion`、`AssistantCommand`、`AvatarCue`、`PlaybackResult`、`ConnectionState`、`GateState`/`GateThreshold`、`ConversationEvent`、`Metrics/LatencyRecorder`、`Metrics/StabilitySessionRecorder` |
 | `Packages/MiniMateKit/Sources/MMDiagnostics/` | 端侧能力探测（V1–V3：`ARKitProbe`、`FoundationModelsProbe`、`NLEmbeddingProbe`、`SpeechProbes`、`EmbeddingSmokeTest`）与 `DiagnosticsRunner` |
-| `Packages/MiniMateKit/Sources/MMSecurity/` | API Key 安全存储协议 `CredentialStore`、`KeychainCredentialStore` 与 `VendorID`（`Codable`） |
+| `Packages/MiniMateKit/Sources/MMSecurity/` | 厂商无关多供应商配置与安全存储：`ProviderRole`、`ProviderProfile`、`ProviderProfileStore`（`JSONFileProviderProfileStore` / `InMemoryProviderProfileStore`）、按 `profileID: UUID` 键控的 `CredentialStore`/`KeychainCredentialStore` v2（主+副凭证） |
 | `Packages/MiniMateKit/Sources/MMPerception/` | 本地感知层：`PerceptionSource` 协议、`PerceptionFeatures`、`ARKitPerceptionSource`（`#if os(iOS)`，TrueDepth + 12 Hz Vision 手势 + 热降频）、`ScriptedPerceptionSource`、`FaceSignalDeriver`、`HandGestureClassifier`、`LookingAtScreenDetector`、`OneEuroFilter`、`ThermalGesturePolicy` |
 | `Packages/MiniMateKit/Sources/MMEmotion/` | 情绪与注意力状态机：`EmotionStateMachine`、`RuleBasedEmotionStateMachine`、`AvatarState`/`AvatarPose`、`ReactionRules`、`ExpressionPreset`（+ `Resources/expression-presets.json`）、`MirrorCorrelationEvaluator`、`TrackLatencyTracker`、`ReflexLatencyTracker`、`FeedbackLatencyTracker` |
 | `Packages/MiniMateKit/Sources/MMAvatar/` | 形象渲染层：`AvatarRenderer` 协议、`RealityKitAvatarRenderer`（`#if os(iOS)` 骨骼/形态键/动作驱动）、`RecordingAvatarRenderer`、`ActionClipManifest`、`AnimationNameMatcher`、`BlendShapeIndex`、`HeartEffect`、`IdleMotionLayer` |
-| `Packages/MiniMateKit/Sources/MMAudio/` | 音频数据与重采样层：`AudioFormatDescription`、`AudioTimeMark`、`AudioChunk`、`PCMConverter`（`AVAudioConverter` 流式/一次性 16-bit 单声道重采样） |
-| `Packages/MiniMateKit/Sources/MMConversation/` | 语音对话核心纯逻辑与协议层：`TagParser`（T-1–T-10）、`SentenceSplitter`（S-1–S-7）、`Persona`（+ `Resources/persona.md`）、`RealtimeTextSession`/`RealtimeOutput`/`RealtimeError`、`TTSProvider`/`TTSEmotionMapping`/`FakeTTSProvider` |
-| `Packages/MiniMateKit/Sources/MMProbeCLI/` | macOS 命令行工具 `mm-probe`（M2a 厂商验证入口，当前为 Phase 1–2 `--help` 占位） |
+| `Packages/MiniMateKit/Sources/MMAudio/` | 音频数据与编解码层：`AudioFormatDescription`、`AudioTimeMark`、`AudioChunk`、`PCMConverter`（`AVAudioConverter` 流式/一次性 16-bit 单声道重采样）、`WAVCodec`/`PCMByteAligner` |
+| `Packages/MiniMateKit/Sources/MMConversation/` | 语音对话核心纯逻辑、通用传输与驱动注册表：`TagParser`、`SentenceSplitter`、`Persona`（+ `Resources/persona.md`）、`RealtimeTextSession`/`FakeRealtimeTextSession`、`TTSProvider`/`TTSEmotionMapping`（泛化 `driverID`）/`FakeTTSProvider`、`Transport/`（`SecretRedactor`/`WebSocketTransport`/`HTTPStreamingTransport`/`FixtureRecordingTransport`/`GzipCodec`）、`Registry/`（`ProviderDriverDescriptor`/`ProviderRegistry`/`BuiltInMockDrivers`） |
+| `Packages/MiniMateKit/Sources/MMProbeCore/` | 插件化 M2a 评测核心库（内部 target，供 CLI 与单测复用）：`ProbeArguments`、`ProbeReport`、`ProbeRunner`（按 `--driver <id>` 动态寻址，零硬编码厂商） |
+| `Packages/MiniMateKit/Sources/MMProbeCLI/` | macOS 命令行工具 `mm-probe` 入口（`list-drivers` / `realtime` / `tone-suite` / `tts` / `record-fixture`） |
 | `Packages/MiniMateKit/Tests/` | Swift Testing 纯逻辑单元测试套件（`MMCoreTests`、`MMDiagnosticsTests`、`MMSecurityTests`、`MMPerceptionTests`、`MMEmotionTests`、`MMAudioTests`、`MMConversationTests`），macOS 下 `swift test` 直接运行 |
 | `Assets/avatar/auto-build/scripts/` | Blender 5.3 + Python 自动化 3D 形象构建、动作时间线、USDZ 导出、渲染与确定性校验管线（Phase 0 / Phase 1） |
 | `scripts/` | 本机运维脚本：`deploy-ios.sh`（零依赖一键编译、安装并启动到真机） |
@@ -54,20 +55,23 @@
 | 动作时间线唯一事实源 | `Assets/avatar/auto-build/scripts/avatar_common.py` | `make_actions` 与 `build_animation_timeline` 定义全部 8 个动作与 `.actions.json` |
 | 流式标签解析与分句 | `Packages/MiniMateKit/Sources/MMConversation/{TagParser,SentenceSplitter}.swift` | 统一流式解析 `<user>`/`<emo>`/`<act>`/`<cmd>`（T-1–T-10）与分句（S-1–S-7） |
 | 人格设定与指令拼装 | `Packages/MiniMateKit/Sources/MMConversation/Persona.swift` + `Resources/persona.md` | 从 `Bundle.module` 根目录加载小瓜人格并拼装标签协议 instructions（1–6 条） |
-| TTS 情绪映射与测试假实现 | `Packages/MiniMateKit/Sources/MMConversation/TTS/{EmotionMapping,FakeTTSProvider}.swift` | 统一 JSON 对象情绪映射加载（缺失回退 `.neutral`）与线程安全 `FakeTTSProvider`（支持延迟/失败/字级时间戳/无竞态 `cancelAll`） |
-| PCM 重采样器 | `Packages/MiniMateKit/Sources/MMAudio/PCMConverter.swift` | 统一流式与一次性 16-bit 单声道重采样（含 FIR 尾帧 `flush()` 与路由切直通复位） |
+| TTS 情绪映射与测试假实现 | `Packages/MiniMateKit/Sources/MMConversation/TTS/{EmotionMapping,FakeTTSProvider}.swift` | 统一按 `driverID` 加载 JSON 情绪映射（缺失回退 `.neutral`）与线程安全 `FakeTTSProvider` |
+| PCM 重采样与 WAV 编解码 | `Packages/MiniMateKit/Sources/MMAudio/{PCMConverter,WAVCodec}.swift` | 统一流式/一次性 16-bit 单声道重采样、WAV 编解码与跨帧奇数字节对齐器 `PCMByteAligner` |
+| 驱动注册表与通用传输/脱敏层 | `Packages/MiniMateKit/Sources/MMConversation/{Registry,Transport}/` | `ProviderRegistry`（单点注册实时/TTS 驱动）、`SecretRedactor`、`WebSocketTransport`/`HTTPStreamingTransport`、`RecordingWebSocketTransport`（自动脱敏与过滤上行音频）、`GzipCodec`（系统 `zlib`） |
+| 多供应商配置与 Keychain 凭证 | `Packages/MiniMateKit/Sources/MMSecurity/{ProviderRole,ProviderProfile,ProviderProfileStore,CredentialStore}.swift` | 双用途非敏感元数据原子持久化与按 `profileID: UUID` 键控的 Keychain 主/副凭证存储 |
 
 ## 4. 依赖方向与禁改边界
 
 - **依赖方向（严格单向，禁止循环依赖）**：
-  - `App/MiniMate` → `MMCore`, `MMDiagnostics`, `MMSecurity`, `MMPerception`, `MMEmotion`, `MMAvatar`
+  - `App/MiniMate` → `MMCore`, `MMDiagnostics`, `MMSecurity`, `MMPerception`, `MMEmotion`, `MMAvatar`, `MMAudio`, `MMConversation`
   - `MMDiagnostics` → `MMCore`
   - `MMPerception` → `MMCore`（禁止反向依赖 `MMEmotion`）
   - `MMEmotion` → `MMCore`, `MMPerception`（禁止反向依赖 `MMAvatar`）
   - `MMAvatar` → `MMCore`, `MMEmotion`
   - `MMAudio` → `MMCore`
-  - `MMConversation` → `MMCore`, `MMAudio`, `MMSecurity`
-  - `MMProbeCLI` → `MMConversation`, `MMAudio`, `MMSecurity`
+  - `MMConversation` → `MMCore`, `MMAudio`, `MMSecurity`（链接系统 `libz`）
+  - `MMProbeCore` → `MMCore`, `MMAudio`, `MMConversation`, `MMSecurity`
+  - `MMProbeCLI` → `MMProbeCore`
   - `MMSecurity` → 无包内依赖
 - **架构红线（见 `.specify/memory/constitution.md`）**：
   - **陪伴而非镜像**：用户感知信号（除视线追踪外）严禁绕过 `EmotionStateMachine` 直接驱动渲染。

@@ -4,90 +4,236 @@ import Testing
 
 @Suite("CredentialStore")
 struct CredentialStoreTests {
-    private func makeStore() -> InMemoryCredentialStore {
-        InMemoryCredentialStore()
-    }
+    @Test func unconfiguredProfileReportsNotConfigured() throws {
+        let store = InMemoryCredentialStore()
+        let profileID = UUID()
 
-    @Test func unconfiguredVendorReportsNotConfigured() {
-        let store = makeStore()
-
-        let status = store.status(for: .aliyun)
-
-        #expect(status.vendor == .aliyun)
+        #expect(try store.load(for: profileID) == nil)
+        let status = store.status(for: profileID)
+        #expect(status.profileID == profileID)
+        #expect(!status.isPrimaryConfigured)
+        #expect(!status.isSecondaryConfigured)
         #expect(!status.isConfigured)
-        #expect(status.suffix == nil)
+        #expect(status.primarySuffix == nil)
+        #expect(status.secondarySuffix == nil)
+        #expect(status.description == "未配置")
     }
 
-    @Test func savedKeyReportsConfiguredWithLast4() throws {
-        let store = makeStore()
+    @Test func saveLoadOverwriteDeleteAndIsolatePrimaryAndSecondarySecrets() throws {
+        let store = InMemoryCredentialStore()
+        let firstID = UUID()
+        let secondID = UUID()
 
-        try store.save(key: "sk-test-abcd1234", for: .aliyun)
-        let status = store.status(for: .aliyun)
+        let initial = ProviderCredentials(primarySecret: "key-alpha-1234", secondarySecret: "sec-beta-5678")
+        try store.save(initial, for: firstID)
 
-        #expect(status.isConfigured)
-        #expect(status.suffix == "1234")
+        #expect(try store.load(for: firstID) == initial)
+        #expect(try store.load(for: secondID) == nil)
+        #expect(!store.status(for: secondID).isConfigured)
+
+        let status = store.status(for: firstID)
+        #expect(status.isPrimaryConfigured)
+        #expect(status.primarySuffix == "1234")
+        #expect(status.isSecondaryConfigured)
+        #expect(status.secondarySuffix == "5678")
+
+        let updated = ProviderCredentials(primarySecret: "key-gamma-9999", secondarySecret: "   ")
+        try store.save(updated, for: firstID)
+        let loadedUpdated = try store.load(for: firstID)
+        #expect(loadedUpdated == ProviderCredentials(primarySecret: "key-gamma-9999", secondarySecret: nil))
+        #expect(store.status(for: firstID).primarySuffix == "9999")
+        #expect(!store.status(for: firstID).isSecondaryConfigured)
+
+        try store.delete(for: firstID)
+        #expect(try store.load(for: firstID) == nil)
+        #expect(!store.status(for: firstID).isConfigured)
+
+        // Deleting an absent profile is idempotent.
+        try store.delete(for: firstID)
     }
 
-    @Test func saveTwiceOverwrites() throws {
-        let store = makeStore()
+    @Test func credentialsAndStatusRedactSecretsAndMaskShortSecrets() throws {
+        let store = InMemoryCredentialStore()
+        let profileID = UUID()
+        let primary = "secret-primary-abcdef1234"
+        let secondary = "secret-secondary-ghijkl5678"
+        let credentials = ProviderCredentials(primarySecret: primary, secondarySecret: secondary)
 
-        try store.save(key: "first-key-0001", for: .openai)
-        try store.save(key: "second-key-9999", for: .openai)
-        let status = store.status(for: .openai)
+        #expect(!credentials.description.contains(primary))
+        #expect(!credentials.description.contains(secondary))
+        #expect(!credentials.debugDescription.contains(primary))
+        #expect(!credentials.debugDescription.contains(secondary))
 
-        #expect(status.suffix == "9999")
-    }
+        try store.save(credentials, for: profileID)
+        let status = store.status(for: profileID)
+        #expect(!status.description.contains(primary))
+        #expect(!status.description.contains(secondary))
+        #expect(!status.debugDescription.contains(primary))
+        #expect(!status.debugDescription.contains(secondary))
+        #expect(status.description.contains("1234"))
+        #expect(status.description.contains("5678"))
 
-    @Test func deleteRemovesKey() throws {
-        let store = makeStore()
+        // Short secrets (<= 4 chars) must be fully masked as "****".
+        let short3ID = UUID()
+        try store.save(ProviderCredentials(primarySecret: "abc", secondarySecret: "1234"), for: short3ID)
+        let shortStatus = store.status(for: short3ID)
+        #expect(shortStatus.primarySuffix == "****")
+        #expect(shortStatus.secondarySuffix == "****")
+        #expect(!shortStatus.description.contains("abc"))
+        #expect(!shortStatus.description.contains("1234"))
 
-        try store.save(key: "sk-test-abcd1234", for: .volcengine)
-        try store.delete(for: .volcengine)
-        let status = store.status(for: .volcengine)
-
-        #expect(!status.isConfigured)
-        #expect(status.suffix == nil)
-    }
-
-    @Test func deletingAbsentKeyDoesNotThrow() {
-        let store = makeStore()
-
-        #expect(throws: Never.self) {
-            try store.delete(for: .aliyun)
+        // Blank primary secret throws emptyPrimarySecret.
+        #expect(throws: CredentialStoreError.emptyPrimarySecret) {
+            try store.save(ProviderCredentials(primarySecret: "   \n\t "), for: UUID())
         }
     }
+}
 
-    @Test func vendorsAreIsolated() throws {
-        let store = makeStore()
-
-        try store.save(key: "ali-key-0000", for: .aliyun)
-
-        #expect(!store.status(for: .openai).isConfigured)
+@Suite("ProviderProfileStore")
+struct ProviderProfileStoreTests {
+    private func makeTempFileURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("minimate-profile-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("provider-profiles.json", isDirectory: false)
     }
 
-    @Test func statusDescriptionNeverContainsFullKey() throws {
-        let store = makeStore()
-        let fullKey = "sk-secret-abcdef1234567890"
+    @Test func jsonStorePersistsAcrossReloadsAndMaintainsPerRoleActive() throws {
+        let fileURL = makeTempFileURL()
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
 
-        try store.save(key: fullKey, for: .aliyun)
-        let status = store.status(for: .aliyun)
+        let store = try JSONFileProviderProfileStore(fileURL: fileURL)
+        let t0 = Date(timeIntervalSince1970: 1_700_000_000)
+        let t1 = Date(timeIntervalSince1970: 1_700_000_010)
 
-        #expect(!status.description.contains(fullKey))
-        #expect(status.description.contains("7890"))
-        #expect(!status.debugDescription.contains(fullKey))
+        let brain1 = ProviderProfile(
+            role: .realtimeBrain,
+            name: "  主力对话  ",
+            driverID: " mock-realtime ",
+            customEndpoint: " https://example.com/ws ",
+            modelName: "  model-a ",
+            voiceID: "  ",
+            createdAt: t0,
+            updatedAt: t0
+        )
+        let brain2 = ProviderProfile(
+            role: .realtimeBrain,
+            name: "备用对话",
+            driverID: "mock-realtime",
+            createdAt: t1,
+            updatedAt: t1
+        )
+        let tts1 = ProviderProfile(
+            role: .emotionalTTS,
+            name: "主力音色",
+            driverID: "mock-tts",
+            voiceID: "demo-voice",
+            createdAt: t0,
+            updatedAt: t0
+        )
+
+        try store.save(brain1)
+        // First saved profile in a role automatically becomes active.
+        #expect(store.activeProfileID(for: .realtimeBrain) == brain1.id)
+        #expect(store.activeProfileID(for: .emotionalTTS) == nil)
+
+        try store.save(brain2)
+        // Saving a second profile keeps the existing active selection.
+        #expect(store.activeProfileID(for: .realtimeBrain) == brain1.id)
+
+        try store.save(tts1)
+        #expect(store.activeProfileID(for: .emotionalTTS) == tts1.id)
+
+        try store.setActive(id: brain2.id, for: .realtimeBrain)
+        #expect(store.activeProfileID(for: .realtimeBrain) == brain2.id)
+
+        // Reload from disk and verify exact state and zero secret fields in JSON.
+        let reloaded = try JSONFileProviderProfileStore(fileURL: fileURL)
+        #expect(reloaded.profiles(for: .realtimeBrain).map(\.id) == [brain1.id, brain2.id])
+        #expect(reloaded.profiles(for: .realtimeBrain).first?.name == "主力对话")
+        #expect(reloaded.profiles(for: .realtimeBrain).first?.customEndpoint == "https://example.com/ws")
+        #expect(reloaded.profiles(for: .realtimeBrain).first?.modelName == "model-a")
+        #expect(reloaded.profiles(for: .realtimeBrain).first?.voiceID == nil)
+        #expect(reloaded.activeProfileID(for: .realtimeBrain) == brain2.id)
+        #expect(reloaded.activeProfileID(for: .emotionalTTS) == tts1.id)
+
+        let rawJSON = try String(contentsOf: fileURL, encoding: .utf8)
+        #expect(!rawJSON.contains("primarySecret"))
+        #expect(!rawJSON.contains("secondarySecret"))
+
+        // Deleting active profile falls back to first remaining in that role.
+        try reloaded.delete(id: brain2.id)
+        #expect(reloaded.activeProfileID(for: .realtimeBrain) == brain1.id)
+        #expect(reloaded.activeProfileID(for: .emotionalTTS) == tts1.id)
+
+        // Deleting the last profile in a role clears activeProfileID to nil.
+        try reloaded.delete(id: brain1.id)
+        #expect(reloaded.activeProfileID(for: .realtimeBrain) == nil)
+        #expect(reloaded.profiles(for: .realtimeBrain).isEmpty)
+        #expect(reloaded.activeProfileID(for: .emotionalTTS) == tts1.id)
+
+        // Clearing active selection explicitly with nil succeeds without deleting the profile.
+        try reloaded.setActive(id: nil, for: .emotionalTTS)
+        #expect(reloaded.activeProfileID(for: .emotionalTTS) == nil)
+        #expect(reloaded.profiles(for: .emotionalTTS).count == 1)
     }
 
-    @Test func vendorIDCasesAndCodableRoundTrip() throws {
-        #expect(VendorID.allCases == [.aliyun, .volcengine, .openai])
+    @Test func corruptJSONStoreThrowsWithoutOverwritingOriginalFile() throws {
+        let fileURL = makeTempFileURL()
+        defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
 
-        let encoder = JSONEncoder()
-        let decoder = JSONDecoder()
-        for vendor in VendorID.allCases {
-            let data = try encoder.encode(vendor)
-            let literal = String(decoding: data, as: UTF8.self)
-            #expect(literal == "\"\(vendor.rawValue)\"")
-            let decoded = try decoder.decode(VendorID.self, from: data)
-            #expect(decoded == vendor)
+        let corruptPayload = Data("{not valid json".utf8)
+        try corruptPayload.write(to: fileURL)
+
+        var threwStorageFailed = false
+        do {
+            _ = try JSONFileProviderProfileStore(fileURL: fileURL)
+        } catch ProviderProfileError.storageFailed {
+            threwStorageFailed = true
+        }
+        #expect(threwStorageFailed)
+        #expect(try Data(contentsOf: fileURL) == corruptPayload)
+    }
+
+    @Test func profileValidationAndRoleIsolationErrors() throws {
+        let store = InMemoryProviderProfileStore()
+
+        #expect(throws: ProviderProfileError.emptyName) {
+            try store.save(ProviderProfile(role: .realtimeBrain, name: "   ", driverID: "mock-realtime"))
+        }
+        #expect(throws: ProviderProfileError.emptyDriverID) {
+            try store.save(ProviderProfile(role: .realtimeBrain, name: "Valid", driverID: " "))
+        }
+        #expect(throws: ProviderProfileError.invalidEndpoint("ftp://example.com/api")) {
+            try store.save(ProviderProfile(
+                role: .realtimeBrain,
+                name: "Valid",
+                driverID: "mock-realtime",
+                customEndpoint: "ftp://example.com/api"
+            ))
+        }
+        #expect(throws: ProviderProfileError.invalidEndpoint("https://")) {
+            try store.save(ProviderProfile(
+                role: .realtimeBrain,
+                name: "Valid",
+                driverID: "mock-realtime",
+                customEndpoint: "https://"
+            ))
+        }
+
+        let sharedID = UUID()
+        try store.save(ProviderProfile(id: sharedID, role: .realtimeBrain, name: "Brain", driverID: "mock-realtime"))
+
+        #expect(throws: ProviderProfileError.roleMismatch(expected: .realtimeBrain, actual: .emotionalTTS)) {
+            try store.save(ProviderProfile(id: sharedID, role: .emotionalTTS, name: "Hijack", driverID: "mock-tts"))
+        }
+
+        let unknownID = UUID()
+        #expect(throws: ProviderProfileError.profileNotFound(unknownID)) {
+            try store.setActive(id: unknownID, for: .realtimeBrain)
+        }
+        #expect(throws: ProviderProfileError.roleMismatch(expected: .emotionalTTS, actual: .realtimeBrain)) {
+            try store.setActive(id: sharedID, for: .emotionalTTS)
         }
     }
 }
