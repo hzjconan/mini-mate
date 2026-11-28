@@ -20,3 +20,6 @@ Assets/avatar/reference/
 .DS_Store
 
 debug/
+
+# Personal voice samples for M2a tone verification (never commit)
+Assets/voice-samples/*.wav

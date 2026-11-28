@@ -72,4 +72,49 @@ struct MMCoreContractTests {
         #expect(ConversationEvent.assistantCueEnded == .assistantCueEnded)
         #expect(ConversationEvent.assistantCueEnded != .assistantSpeechEnded)
     }
+
+    @Test("ConnectionState、GateState 与 ConversationEvent M2 扩展的语义与 Equatable")
+    func connectionAndGateStateContracts() throws {
+        // GateThreshold 全枚举与 Codable 往返
+        #expect(GateThreshold.allCases == [.normal, .raised, .playback])
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        for threshold in GateThreshold.allCases {
+            let data = try encoder.encode(threshold)
+            #expect(try decoder.decode(GateThreshold.self, from: data) == threshold)
+        }
+
+        // GateState isUploading & threshold
+        #expect(GateState.open(threshold: .playback).isUploading == true)
+        #expect(GateState.open().isUploading == true)
+        #expect(GateState.muted.isUploading == false)
+        #expect(GateState.paused.isUploading == false)
+        #expect(GateState.closed().isUploading == false)
+        #expect(GateState.closed(threshold: .raised).isUploading == false)
+
+        #expect(GateState.muted.threshold == nil)
+        #expect(GateState.paused.threshold == nil)
+        #expect(GateState.closed().threshold == .normal)
+        #expect(GateState.closed(threshold: .raised).threshold == .raised)
+        #expect(GateState.open(threshold: .playback).threshold == .playback)
+
+        // Equatable 精确区分不同载荷
+        #expect(ConnectionState.reconnecting(attempt: 1) == .reconnecting(attempt: 1))
+        #expect(ConnectionState.reconnecting(attempt: 1) != .reconnecting(attempt: 2))
+        #expect(ConnectionState.connecting != .connected)
+        #expect(ConnectionState.connected != .lost)
+
+        #expect(GateState.closed(threshold: .normal) == .closed())
+        #expect(GateState.closed(threshold: .normal) != .closed(threshold: .raised))
+        #expect(GateState.open(threshold: .normal) != .open(threshold: .playback))
+
+        #expect(
+            ConversationEvent.connectionStateChanged(.reconnecting(attempt: 1))
+                != .connectionStateChanged(.reconnecting(attempt: 2))
+        )
+        #expect(
+            ConversationEvent.gateStateChanged(.closed(threshold: .normal))
+                != .gateStateChanged(.closed(threshold: .raised))
+        )
+    }
 }

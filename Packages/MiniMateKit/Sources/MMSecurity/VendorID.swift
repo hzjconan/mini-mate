@@ -1,7 +1,7 @@
 import Foundation
 
 /// Cloud vendors whose API keys the user may configure (M2a 后按实际厂商增删).
-public enum VendorID: String, CaseIterable, Sendable {
+public enum VendorID: String, CaseIterable, Codable, Sendable {
     case aliyun
     case volcengine
     case openai

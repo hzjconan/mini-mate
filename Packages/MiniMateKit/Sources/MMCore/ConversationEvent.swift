@@ -17,4 +17,8 @@ public enum ConversationEvent: Sendable, Equatable {
     case assistantCue(AvatarCue)
     /// 005：结束当前保持中的提示。
     case assistantCueEnded
+    /// 003：实时会话连接状态变化，不属于对话轮次（conversation-engine.md E-4）。
+    case connectionStateChanged(ConnectionState)
+    /// 003：收音闸门状态变化（驱动静音姿态与调试面板显示，E-4）。
+    case gateStateChanged(GateState)
 }

@@ -410,7 +410,7 @@ public actor RuleBasedEmotionStateMachine: EmotionStateMachine {
                 )
             }
 
-        case .assistantCommand, .assistantText, .userTranscript:
+        case .assistantCommand, .assistantText, .userTranscript, .connectionStateChanged, .gateStateChanged:
             break
         }
     }

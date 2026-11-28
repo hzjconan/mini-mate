@@ -16,11 +16,11 @@ description: "M2 语音对话的任务列表"
 
 ## Phase 1: Setup
 
-- [ ] T001 `Kit/Package.swift` 新增 targets：`MMAudio`、`MMConversation`（资源：`persona.md`、`tts-emotion-*.json`）、executable `mm-probe`（target `MMProbeCLI`，仅 macOS）、测试 `MMAudioTests`、`MMConversationTests`
-- [ ] T002 [P] `.gitignore` 增加 `Assets/voice-samples/*.wav`
-- [ ] T003 [P] `App/MiniMate/Info.plist` 增加 `NSMicrophoneUsageDescription`
-- [ ] T004 [P] `MMSecurity/VendorID.swift` 按候选厂商更新（`aliyun`、`volcengine`、`openai`）
-- [ ] T005 [P] `Kit/Sources/MMConversation/Resources/persona.md`：写入人格设定：名字"小瓜"，呆萌、俏皮、话不多，称呼用户为"你"，每次回答 1–3 句（spec.md Assumptions）
+- [x] T001 `Kit/Package.swift` 新增 targets：`MMAudio`、`MMConversation`（资源：`persona.md`、`tts-emotion-*.json`）、executable `mm-probe`（target `MMProbeCLI`，仅 macOS）、测试 `MMAudioTests`、`MMConversationTests`
+- [x] T002 [P] `.gitignore` 增加 `Assets/voice-samples/*.wav`
+- [x] T003 [P] `App/MiniMate/Info.plist` 增加 `NSMicrophoneUsageDescription`
+- [x] T004 [P] `MMSecurity/VendorID.swift` 按候选厂商更新（`aliyun`、`volcengine`、`openai`）
+- [x] T005 [P] `Kit/Sources/MMConversation/Resources/persona.md`：写入人格设定：名字"小瓜"，呆萌、俏皮、话不多，称呼用户为"你"，每次回答 1–3 句（spec.md Assumptions）
 
 ---
 
@@ -28,18 +28,18 @@ description: "M2 语音对话的任务列表"
 
 ### Tests（先写）
 
-- [ ] T006 [P] `Kit/Tests/MMConversationTests/TagParserTests.swift`：tag-protocol.md T-1–T-7；随机切分一致性（参数化）
-- [ ] T007 [P] `Kit/Tests/MMConversationTests/SentenceSplitterTests.swift`：S-1–S-7
+- [x] T006 [P] `Kit/Tests/MMConversationTests/TagParserTests.swift`：tag-protocol.md T-1–T-7；随机切分一致性（参数化）
+- [x] T007 [P] `Kit/Tests/MMConversationTests/SentenceSplitterTests.swift`：S-1–S-7
 
 ### Implementation
 
-- [ ] T008 [P] `Kit/Sources/MMAudio/AudioChunk.swift`、`GateState.swift`；`MMCore/ConversationEvent.swift` 增加 `connectionStateChanged`、`gateStateChanged`
-- [ ] T009 [P] `Kit/Sources/MMConversation/Realtime/RealtimeTextSession.swift`、`RealtimeOutput`、`RealtimeError`（contracts/realtime-session.md）
-- [ ] T010 [P] `Kit/Sources/MMConversation/TTS/TTSProvider.swift`、`EmotionMapping.swift`、`FakeTTSProvider.swift`
-- [ ] T011 [P] `Kit/Sources/MMConversation/TagParser.swift`（使 T006 通过）
-- [ ] T012 [P] `Kit/Sources/MMConversation/SentenceSplitter.swift`（使 T007 通过）
-- [ ] T013 [P] `Kit/Sources/MMConversation/Persona.swift`：加载 `persona.md`，与标签协议说明拼成 instructions
-- [ ] T014 [P] `Kit/Sources/MMAudio/PCMConverter.swift`：重采样到 16 / 24 kHz Int16（macOS 可测，附测试）
+- [x] T008 [P] `Kit/Sources/MMAudio/AudioChunk.swift`、`GateState.swift`；`MMCore/ConversationEvent.swift` 增加 `connectionStateChanged`、`gateStateChanged`
+- [x] T009 [P] `Kit/Sources/MMConversation/Realtime/RealtimeTextSession.swift`、`RealtimeOutput`、`RealtimeError`（contracts/realtime-session.md）
+- [x] T010 [P] `Kit/Sources/MMConversation/TTS/TTSProvider.swift`、`EmotionMapping.swift`、`FakeTTSProvider.swift`
+- [x] T011 [P] `Kit/Sources/MMConversation/TagParser.swift`（使 T006 通过）
+- [x] T012 [P] `Kit/Sources/MMConversation/SentenceSplitter.swift`（使 T007 通过）
+- [x] T013 [P] `Kit/Sources/MMConversation/Persona.swift`：加载 `persona.md`，与标签协议说明拼成 instructions
+- [x] T014 [P] `Kit/Sources/MMAudio/PCMConverter.swift`：重采样到 16 / 24 kHz Int16（macOS 可测，附测试）
 
 **Checkpoint**：解析与分句测试全部通过
 

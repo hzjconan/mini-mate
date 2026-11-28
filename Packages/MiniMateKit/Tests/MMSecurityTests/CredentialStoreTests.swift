@@ -76,4 +76,18 @@ struct CredentialStoreTests {
         #expect(status.description.contains("7890"))
         #expect(!status.debugDescription.contains(fullKey))
     }
+
+    @Test func vendorIDCasesAndCodableRoundTrip() throws {
+        #expect(VendorID.allCases == [.aliyun, .volcengine, .openai])
+
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        for vendor in VendorID.allCases {
+            let data = try encoder.encode(vendor)
+            let literal = String(decoding: data, as: UTF8.self)
+            #expect(literal == "\"\(vendor.rawValue)\"")
+            let decoded = try decoder.decode(VendorID.self, from: data)
+            #expect(decoded == vendor)
+        }
+    }
 }

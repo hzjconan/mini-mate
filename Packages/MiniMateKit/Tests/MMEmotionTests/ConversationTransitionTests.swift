@@ -461,4 +461,41 @@ struct ConversationTransitionTests {
         tracker.reset()
         #expect(tracker.observeAppliedState(.thinking, at: 50.01) == nil)
     }
+
+    @Test("M2 扩展事件：connectionStateChanged 与 gateStateChanged 在当前阶段不改变状态")
+    func connectionAndGateStateEventsDoNotMutateState() async {
+        let clock = ManualClock(seconds: 200.0)
+        let sm = RuleBasedEmotionStateMachine(clock: clock, random: { 0.5 })
+        await enterAttending(sm, clock: clock, at: 200.0)
+
+        let beforeAttending = await sm.state
+        #expect(beforeAttending.kind == .attending)
+
+        clock.advance(by: 0.1)
+        await sm.handle(ConversationEvent.connectionStateChanged(.reconnecting(attempt: 1)))
+        await sm.handle(ConversationEvent.gateStateChanged(.muted))
+
+        let afterAttending = await sm.state
+        #expect(afterAttending.kind == beforeAttending.kind)
+        #expect(afterAttending.baseEmotion == beforeAttending.baseEmotion)
+
+        // Speaking(.happy) 状态下同样无副作用
+        clock.advance(by: 0.1)
+        await sm.handle(ConversationEvent.userSpeechStarted)
+        clock.advance(by: 0.1)
+        await sm.handle(ConversationEvent.assistantSpeechStarted)
+        clock.advance(by: 0.1)
+        await sm.handle(ConversationEvent.assistantEmotion(.happy))
+
+        let beforeSpeaking = await sm.state
+        #expect(beforeSpeaking.kind == .speaking(.happy))
+
+        clock.advance(by: 0.1)
+        await sm.handle(ConversationEvent.connectionStateChanged(.lost))
+        await sm.handle(ConversationEvent.gateStateChanged(.open(threshold: .playback)))
+
+        let afterSpeaking = await sm.state
+        #expect(afterSpeaking.kind == beforeSpeaking.kind)
+        #expect(afterSpeaking.baseEmotion == beforeSpeaking.baseEmotion)
+    }
 }
